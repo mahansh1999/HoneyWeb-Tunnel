@@ -31,7 +31,7 @@ func TestTheOverviewOffersTheQuickActions(t *testing.T) {
 		{"Health check", "/health"},
 		{"Settings", "/settings"},
 		{"Support", "/support"},
-		{"Bug reports", "https://github.com/AminMGMT/BackPack/issues"},
+		{"Bug reports", "/support"},
 	} {
 		if !strings.Contains(src, `'`+want.label+`'`) {
 			t.Errorf("the overview has no %q action", want.label)

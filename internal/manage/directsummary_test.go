@@ -76,7 +76,7 @@ func TestL3SummaryShowsWhatWasAsked(t *testing.T) {
 		"Direct PCK", "bp0", "10.10.0.1/30", "10.10.0.2",
 		"203.0.113.9:9000", "3233", "GRE Key", "42", "Balance",
 		"Setup Link (sudo backpack → Setup Kharej → Direct → Setup Link):",
-		"Install BackPack And Set Up This Tunnel (Kharej Without BackPack, As Root):",
+		"Install HoneyWeb Tunnel And Set Up This Tunnel (Kharej Without HoneyWeb Tunnel, As Root):",
 		"install.sh) link apply 'backpack://", link,
 	} {
 		if !strings.Contains(out, want) {

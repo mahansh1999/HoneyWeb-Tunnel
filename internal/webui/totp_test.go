@@ -103,7 +103,7 @@ func TestTheProvisioningURIIsOneAnAppCanRead(t *testing.T) {
 		t.Fatalf("not an otpauth URI: %s", uri)
 	}
 	for _, want := range []string{
-		"secret=JBSWY3DPEHPK3PXP", "issuer=Backpack",
+		"secret=JBSWY3DPEHPK3PXP", "issuer=HoneyWeb+Tunnel",
 		"algorithm=SHA1", "digits=6", "period=30",
 	} {
 		if !strings.Contains(uri, want) {
