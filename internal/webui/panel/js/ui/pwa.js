@@ -47,14 +47,14 @@ async function install() {
     ev.prompt();
     try {
       const { outcome } = await ev.userChoice;
-      if (outcome === 'accepted') toast('Installing Backpack on this device.');
+      if (outcome === 'accepted') toast('Installing HoneyWeb Tunnel on this device.');
     } catch (e) { /* the prompt was dismissed */ }
     paintButton();
     return;
   }
   if (isIOS()) {
     await confirmBox({
-      title: 'Install Backpack on this device',
+      title: 'Install HoneyWeb Tunnel on this device',
       body: 'Safari installs it from the Share sheet. It opens full screen, like any other app.',
       lines: [
         { text: '1. Tap Share at the bottom of Safari' },

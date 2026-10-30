@@ -21,7 +21,7 @@ import (
 func updateMenu() {
 	for {
 		tui.Clear()
-		tui.Title("Update Backpack")
+		tui.Title("Update HoneyWeb Tunnel")
 		tui.Warn("Version : " + app.Version)
 		tui.Warn("Channel : " + manage.ChannelLabel())
 		fmt.Println()

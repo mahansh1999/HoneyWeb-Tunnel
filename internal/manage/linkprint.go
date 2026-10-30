@@ -40,10 +40,10 @@ func printLinkBlock(link, menuPath string) {
 	fmt.Println(tui.Color(tui.Bold+tui.White, link))
 	fmt.Println()
 	if command == "" {
-		tui.Info("Install The Same BackPack Build On Kharej With BP_HELPERS=naive,xray, Then Apply:")
+		tui.Info("Install The Same HoneyWeb Tunnel Build On Kharej With BP_HELPERS=naive,xray, Then Apply:")
 		fmt.Println(tui.Color(tui.Bold+tui.White, "sudo backpack link apply '"+link+"'"))
 	} else {
-		tui.Info("Install BackPack And Set Up This Tunnel (Kharej Without BackPack, As Root):")
+		tui.Info("Install HoneyWeb Tunnel And Set Up This Tunnel (Kharej Without HoneyWeb Tunnel, As Root):")
 		fmt.Println(tui.Color(tui.Bold+tui.White, command))
 	}
 }

@@ -161,7 +161,7 @@ func configureAlerts(cfg telegram.Config) {
 		a.MemPercent = tui.PromptInt("Memory %", a.MemPercent)
 		a.DiskPercent = tui.PromptInt("Disk %", a.DiskPercent)
 		a.TunnelDown = tui.Confirm("Tunnel Down / Back", a.TunnelDown)
-		a.NewRelease = tui.Confirm("New Backpack Release", a.NewRelease)
+		a.NewRelease = tui.Confirm("New HoneyWeb Tunnel Release", a.NewRelease)
 		a.CheckSeconds = tui.PromptInt("Check Every (Seconds)", a.CheckSeconds)
 		a.CooldownMinutes = tui.PromptInt("Repeat Every (Minutes)", a.CooldownMinutes)
 	}

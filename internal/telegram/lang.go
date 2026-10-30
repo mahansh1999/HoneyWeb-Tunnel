@@ -39,7 +39,7 @@ var fa = map[string]string{
 	"🗑 Tunnel <b>%s</b> no longer exists": "🗑 تونل <b>%s</b> دیگر وجود ندارد",
 
 	// Release announcement
-	"⬆️ Backpack %s has been released (you are on %s).":                                            "⬆️ نسخه %s بک‌پک منتشر شد (نسخه فعلی شما %s است).",
+	"⬆️ HoneyWeb Tunnel %s has been released (you are on %s).":                                     "⬆️ نسخه %s HoneyWeb Tunnel منتشر شد (نسخه فعلی شما %s است).",
 	"Update from the CLI: sudo backpack → Update.":                                                 "برای به‌روزرسانی در ترمینال: sudo backpack ← Update.",
 	"It saves a restore point first and rolls back by itself if the tunnel does not come back up.": "ابتدا یک نقطه بازیابی می‌سازد و اگر تونل بالا نیامد، خودش برمی‌گردد.",
 
@@ -92,8 +92,8 @@ var fa = map[string]string{
 	"No log output.":                "لاگی ثبت نشده است.",
 
 	// Health details, as the health checker words them
-	"peer connected":         "طرف مقابل متصل است",
-	"service is not running": "سرویس در حال اجرا نیست",
+	"peer connected":                                "طرف مقابل متصل است",
+	"service is not running":                        "سرویس در حال اجرا نیست",
 	"no systemd unit — the tunnel is not installed": "یونیت systemd وجود ندارد — تونل نصب نشده است",
 	"running, but no client is connected yet":       "در حال اجراست، ولی هنوز کلاینتی وصل نشده",
 	"running, but not connected to the server":      "در حال اجراست، ولی به سرور وصل نیست",

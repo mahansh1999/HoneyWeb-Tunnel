@@ -17,6 +17,15 @@ const (
 	RepoOwner = "AminMGMT"
 	RepoName  = "BackPack"
 
+	// ProductName is what this build calls itself wherever a user reads it.
+	// HoneyWeb Tunnel is a fork of BackPack and does not use the BackPack
+	// name for the product (see TRADEMARK.md).
+	ProductName = "HoneyWeb Tunnel"
+
+	// SupportContact is where the product points users for help: a
+	// placeholder until HoneyWeb publishes its support channel.
+	SupportContact = "HoneyWeb support (contact details coming soon)"
+
 	// SourceURL is where the source lives, printed with the version.
 	SourceURL = "https://github.com/" + RepoOwner + "/" + RepoName
 

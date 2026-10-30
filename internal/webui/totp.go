@@ -133,10 +133,10 @@ func otpauthURI(secret, host string) string {
 	if host == "" {
 		host = "panel"
 	}
-	label := "Backpack:" + host
+	label := "HoneyWeb Tunnel:" + host
 	q := url.Values{}
 	q.Set("secret", secret)
-	q.Set("issuer", "Backpack")
+	q.Set("issuer", "HoneyWeb Tunnel")
 	q.Set("algorithm", "SHA1")
 	q.Set("digits", fmt.Sprint(totpDigits))
 	q.Set("period", fmt.Sprint(int(totpStep.Seconds())))

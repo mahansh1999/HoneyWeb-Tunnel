@@ -209,7 +209,7 @@ func DecodeShareLink(s string) (out ShareLink, err error) {
 		return out, fmt.Errorf("paste the setup link from the other server")
 	}
 	if !strings.HasPrefix(s, shareScheme) {
-		return out, fmt.Errorf("that does not look like a Backpack setup link — it should begin with %s", shareScheme)
+		return out, fmt.Errorf("that does not look like a HoneyWeb Tunnel setup link — it should begin with %s", shareScheme)
 	}
 	if strings.HasPrefix(s, connTestScheme) {
 		return out, fmt.Errorf("this is a connection-test link, not a setup link — on the kharej run " +

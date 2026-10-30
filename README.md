@@ -1,3 +1,7 @@
+> **HoneyWeb Tunnel** is a modified version (fork) of BackPack, maintained by HoneyWeb.
+> Based on BackPack by Amin Mohammadi (AminMGMT) — https://github.com/AminMGMT/BackPack (AGPL-3.0).
+> BackPack's data-plane is derived from Backhaul by Musixal (AGPL-3.0). See NOTICE.
+
 <p align="center">
   <img src="img/image.png" alt="BackPack" width="100%">
 </p>

@@ -332,7 +332,7 @@ func bar(pct float64) string {
 // list, written once.
 func helpText(lang string) string {
 	var out strings.Builder
-	out.WriteString(b("🎒 Backpack") + " " + esc(app.Version) + "\n\n")
+	out.WriteString(b("🎒 HoneyWeb Tunnel") + " " + esc(app.Version) + "\n\n")
 	for _, e := range commandList() {
 		fmt.Fprintf(&out, "/%s — %s\n", e.name, esc(tr(lang, e.desc)))
 	}
@@ -417,7 +417,7 @@ func SendStatusNow() error {
 // first attempt as a failure is how a working setup looks broken right after it
 // is configured.
 func SendTest(c Config) error {
-	const msg = "✅ Backpack is connected. You will receive status reports here."
+	const msg = "✅ HoneyWeb Tunnel is connected. You will receive status reports here."
 
 	// Only a relayed send has the restart-then-reconnect race; a direct send
 	// that fails is failing for a real reason and should say so at once.
@@ -746,11 +746,7 @@ func webUIText(lang string) string {
 
 func supportText(lang string) string {
 	return b("💛 "+tr(lang, "Support")) + "\n\n" +
-		"GitHub : https://github.com/AminMGMT\n" +
-		"Channel : https://t.me/BlackProtocols\n\n" +
-		"🔺 Tron [ TRX ] :\n" + code("TTzuUAtsEsrLgNpFVLNTyLVJVRRFNWESYc") + "\n\n" +
-		"💠 USDT [ BEP20 ] :\n" + code("0xc112AE9bfF7c59dEcFb34E988A397848D3093E82") + "\n\n" +
-		"💎 Gram [ TON ] :\n" + code("UQD9g40QubAICJ6zPqegtCY7s-joMx2DB8aIqA0xF1aHoCDs")
+		app.ProductName + "\n" + app.SupportContact
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) {

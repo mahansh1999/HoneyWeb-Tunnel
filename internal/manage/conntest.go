@@ -197,7 +197,7 @@ type connTestAddr struct {
 func parseConnTestLink(s string) (connTestAddr, error) {
 	s = FindSetupLink(s)
 	if !strings.HasPrefix(s, connTestScheme) {
-		return connTestAddr{}, fmt.Errorf("that is not a Backpack connection-test link — it begins with %s", connTestScheme)
+		return connTestAddr{}, fmt.Errorf("that is not a HoneyWeb Tunnel connection-test link — it begins with %s", connTestScheme)
 	}
 	b, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(s, connTestScheme))
 	if err != nil || len(b) <= connTestFixedLen || (b[0] != connTestLinkVer && b[0] != 2) {

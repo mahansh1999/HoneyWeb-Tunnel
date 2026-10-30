@@ -76,7 +76,7 @@ func systemChecks() []Check {
 	const g = "System"
 	var out []Check
 
-	out = append(out, Check{Group: g, Name: "Backpack version", Level: CheckInfo, Detail: app.Version})
+	out = append(out, Check{Group: g, Name: "HoneyWeb Tunnel version", Level: CheckInfo, Detail: app.Version})
 
 	// Binary present and executable.
 	if fi, err := os.Stat(app.BinPath); err == nil {
@@ -87,7 +87,7 @@ func systemChecks() []Check {
 		out = append(out, Check{Group: g, Name: "Binary", Level: lvl, Detail: app.BinPath, Fix: fix})
 	} else {
 		out = append(out, Check{Group: g, Name: "Binary", Level: CheckFail,
-			Detail: "missing at " + app.BinPath, Fix: "reinstall Backpack"})
+			Detail: "missing at " + app.BinPath, Fix: "reinstall HoneyWeb Tunnel"})
 	}
 
 	// Running as root — everything here needs it.
@@ -103,12 +103,12 @@ func systemChecks() []Check {
 		out = append(out, Check{Group: g, Name: "systemd", Level: CheckOK, Detail: "available"})
 	} else {
 		out = append(out, Check{Group: g, Name: "systemd", Level: CheckFail,
-			Detail: "systemctl not found", Fix: "Backpack needs systemd to manage services"})
+			Detail: "systemctl not found", Fix: "HoneyWeb Tunnel needs systemd to manage services"})
 	}
 
 	if runtime.GOOS != "linux" {
 		out = append(out, Check{Group: g, Name: "Platform", Level: CheckWarn,
-			Detail: runtime.GOOS, Fix: "Backpack is designed for Linux servers"})
+			Detail: runtime.GOOS, Fix: "HoneyWeb Tunnel is designed for Linux servers"})
 		return out
 	}
 

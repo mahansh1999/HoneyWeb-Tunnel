@@ -776,7 +776,7 @@ export function serversView(ctx) {
     /* Adding can take minutes rather than seconds, because a server with no
        Backpack on it gets one. Said plainly while it happens: a button that sits
        there for two minutes with no explanation is one people press again. */
-    note.textContent = 'Logging in, and installing Backpack if that server has none. '
+    note.textContent = 'Logging in, and installing HoneyWeb Tunnel if that server has none. '
                      + 'This can take a couple of minutes.';
     try {
       const state = await api.nodeAdd(fields);

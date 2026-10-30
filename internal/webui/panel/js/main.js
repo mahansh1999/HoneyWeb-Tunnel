@@ -86,7 +86,7 @@ function toggleAppearance() {
 function paintHeader(state) {
   const s = state.stats;
   if (!s) return;
-  $('.HH .who b').textContent = s.hostname || 'Backpack';
+  $('.HH .who b').textContent = s.hostname || 'HoneyWeb Tunnel';
   $('#hdr-sub').textContent = [s.version, s.location].filter(Boolean).join(' · ') || '—';
   /* Only speak when something is wrong or actionable. */
   $('#warnbar').hidden = s.monitorRunning !== false;

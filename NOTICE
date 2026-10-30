@@ -60,3 +60,21 @@ patterniha (https://github.com/patterniha/SNI-Spoofing) and implemented in Rust
 by therealaleph (https://github.com/therealaleph/sni-spoofing-rust, MIT). The Go
 code here is original; the fake ClientHello it sends follows the shape that
 implementation established.
+
+--------------------------------------------------------------------------------
+HoneyWeb Tunnel (modified version)
+--------------------------------------------------------------------------------
+
+HoneyWeb Tunnel is a modified version of BackPack, maintained by HoneyWeb.
+Modifications Copyright (C) 2026 HoneyWeb. Licensed under AGPL-3.0, like the
+work it is based on; the additional terms above continue to apply.
+
+Based on BackPack by Amin Mohammadi (AminMGMT)
+https://github.com/AminMGMT/BackPack
+
+BackPack's tunnel data-plane is in turn derived from Backhaul by Musixal
+(https://github.com/Musixal/Backhaul, AGPL-3.0).
+
+First HoneyWeb modification: 2026-10-30 — product name, panel/CLI titles and
+support details changed to HoneyWeb Tunnel; network engine, protocols,
+configuration and defaults left unchanged. See the Git history for details.

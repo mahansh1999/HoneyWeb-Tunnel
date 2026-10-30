@@ -83,7 +83,7 @@ func ctSpeedDirection(parent context.Context, dial func() (net.Conn, error), dir
 				_, err = io.ReadFull(c, ack)
 			}
 			if err == nil && string(ack) != ctSpeedAck {
-				err = errors.New("kharej does not support the speed test; update Backpack on both servers")
+				err = errors.New("kharej does not support the speed test; update HoneyWeb Tunnel on both servers")
 			}
 			ready <- err
 			if err != nil {

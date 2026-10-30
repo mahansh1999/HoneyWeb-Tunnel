@@ -1,4 +1,4 @@
-BIN      := backpack
+BIN      := hwtunnel
 BIN_PATH := /usr/local/bin/backpack
 LDFLAGS  := -s -w
 

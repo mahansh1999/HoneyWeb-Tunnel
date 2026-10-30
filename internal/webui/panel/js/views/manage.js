@@ -178,7 +178,7 @@ function proxyCard(p, test) {
 /* ---- File Locations ------------------------------------------------------ */
 let fileQuery = '';
 let filesOpen = false;
-const GROUPS = ['Backpack', 'Services', 'Tunnels', 'Backups'];
+const GROUPS = ['HoneyWeb Tunnel', 'Services', 'Tunnels', 'Backups'];
 
 function fileRows(files) {
   const q = fileQuery.trim().toLowerCase();

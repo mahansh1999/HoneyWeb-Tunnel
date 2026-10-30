@@ -161,12 +161,6 @@ function troubles(state, fleet, backup) {
 function footer() {
   return `<div class="ov-foot">
     <div class="ov-links">
-      <a href="https://github.com/AminMGMT" target="_blank" rel="noopener" title="GitHub" aria-label="GitHub">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.9a3.4 3.4 0 00-1-2.6c3-.3 6.5-1.5 6.5-7A5.4 5.4 0 0020 4.8 5 5 0 0019.9 1S18.7.6 16 2.5a13.4 13.4 0 00-7 0C6.3.6 5.1 1 5.1 1A5 5 0 005 4.8 5.4 5.4 0 003.5 8.5c0 5.5 3.5 6.7 6.5 7a3.4 3.4 0 00-1 2.6V22"/></svg>
-      </a>
-      <a href="https://t.me/BlackProtocols" target="_blank" rel="noopener" title="Telegram" aria-label="Telegram">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 3L2 11l6 2 2 6 3-4 5 4z"/><path d="M8 13l8-6"/></svg>
-      </a>
     </div>
     <a class="ov-by" href="https://blackprotocols.space" target="_blank" rel="noopener">developed by AminMGMT</a>
   </div>`;
@@ -188,8 +182,8 @@ const ACTIONS = [
     note: 'The panel, alerts and backups' },
   { icon: 'life', label: 'Support', to: '/support',
     note: 'Where to ask, and what to send' },
-  { icon: 'bug', label: 'Bug reports', href: 'https://github.com/AminMGMT/BackPack/issues',
-    note: 'Report one, or read the open ones' },
+  { icon: 'bug', label: 'Bug reports', to: '/support',
+    note: 'Report one to HoneyWeb support' },
 ];
 
 function quickActions() {

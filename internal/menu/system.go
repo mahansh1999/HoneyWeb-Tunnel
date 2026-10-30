@@ -60,7 +60,7 @@ func optimizeMenu() {
 // uninstallMenu is main-menu item 9.
 func uninstallMenu() {
 	tui.Clear()
-	tui.Title("Uninstall Backpack")
+	tui.Title("Uninstall HoneyWeb Tunnel")
 	fmt.Println()
 	tui.Warn("Removes Everything: Tunnels, Configs, The Binary And " + app.InstallDir + " (Backups Too).")
 	if !tui.Confirm("Are You Sure", false) {

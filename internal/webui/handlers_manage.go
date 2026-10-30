@@ -68,7 +68,7 @@ func fileGroup(label string) string {
 	case strings.Contains(label, "Backup") || strings.Contains(label, "Snapshot"):
 		return "Backups"
 	default:
-		return "Backpack"
+		return "HoneyWeb Tunnel"
 	}
 }
 

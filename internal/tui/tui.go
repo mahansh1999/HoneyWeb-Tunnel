@@ -124,19 +124,17 @@ func Rule() {
 	fmt.Println(Gray + "═══════════════════════════════════════════════════════" + Reset)
 }
 
-// Logo prints the backpack banner and version.
+// Logo prints the product banner and version. The text banner is a
+// placeholder until the HoneyWeb logo artwork is supplied.
 func Logo(version string) {
 	fmt.Print(Red)
 	fmt.Println(`
- ██████╗  █████╗  ██████╗██╗  ██╗██████╗  █████╗  ██████╗██╗  ██╗
- ██╔══██╗██╔══██╗██╔════╝██║ ██╔╝██╔══██╗██╔══██╗██╔════╝██║ ██╔╝
- ██████╔╝███████║██║     █████╔╝ ██████╔╝███████║██║     █████╔╝
- ██╔══██╗██╔══██║██║     ██╔═██╗ ██╔═══╝ ██╔══██║██║     ██╔═██╗
- ██████╔╝██║  ██║╚██████╗██║  ██╗██║     ██║  ██║╚██████╗██║  ██╗
- ╚═════╝ ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝`)
+ ╔═══════════════════════════════════════╗
+ ║     H O N E Y W E B   T U N N E L     ║
+ ╚═══════════════════════════════════════╝`)
 	fmt.Print(Reset)
-	fmt.Printf("%s Backpack  %s%s%s\n", Bold+White, Red, version, Reset)
-	fmt.Println(Gray + " TeleGram : @BlackProtocols  |  GitHub : https://github.com/AminMGMT" + Reset)
+	fmt.Printf("%s HoneyWeb Tunnel  %s%s%s\n", Bold+White, Red, version, Reset)
+	fmt.Println(Gray + " Support : HoneyWeb support (contact details coming soon)" + Reset)
 }
 
 // Prompt reads a trimmed line after printing label.

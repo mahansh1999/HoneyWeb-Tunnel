@@ -16,7 +16,7 @@
 const OFFLINE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Backpack · Offline</title>
+<title>HoneyWeb Tunnel · Offline</title>
 <style>
   :root{color-scheme:dark light;--bg:#070707;--s1:#111111;--ln:rgba(255,255,255,.1);
     --tx:#fafafa;--dim:#8e8e8e}

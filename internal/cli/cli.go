@@ -624,7 +624,7 @@ func linkReport(done manage.LinkApplied) Result {
 	ok := paint("32;1", "✓")
 	row := func(k, v string) { say("    %s %s\n", paint("2", fmt.Sprintf("%-9s", k)), v) }
 
-	say("\n  %s\n%s", paint("1", "Backpack · setup link"), rule)
+	say("\n  %s\n%s", paint("1", "HoneyWeb Tunnel · setup link"), rule)
 	verb := "created"
 	if done.Updated {
 		verb = "updated to match the Iran side"

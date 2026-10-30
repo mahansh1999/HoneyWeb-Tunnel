@@ -44,9 +44,9 @@ func (s *server) handleChannel(w http.ResponseWriter, r *http.Request) {
 // every installed app at the root, where the panel no longer answers.
 var manifestJSON = []byte(`{
   "id": "./",
-  "name": "Backpack Panel",
-  "short_name": "Backpack",
-  "description": "Live tunnel and server monitoring for Backpack.",
+  "name": "HoneyWeb Tunnel Panel",
+  "short_name": "HoneyWeb Tunnel",
+  "description": "Live tunnel and server monitoring for HoneyWeb Tunnel.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

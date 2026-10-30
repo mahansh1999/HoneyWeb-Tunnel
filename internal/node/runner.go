@@ -184,7 +184,7 @@ func (r *SSHRunner) exec(ctx context.Context, name string, t SSHTarget, req Requ
 
 	line := strings.TrimSpace(string(stdout))
 	if line == "" {
-		return Response{}, fmt.Errorf("%s answered nothing — is Backpack installed there?", name)
+		return Response{}, fmt.Errorf("%s answered nothing — is HoneyWeb Tunnel installed there?", name)
 	}
 	dec, err := base64.StdEncoding.DecodeString(lastLine(line))
 	if err != nil {
@@ -228,9 +228,9 @@ func backpackMissing(err error) error {
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "not found"), strings.Contains(msg, "No such file"):
-		return errNotInstalled("Backpack is not installed on that server")
+		return errNotInstalled("HoneyWeb Tunnel is not installed on that server")
 	case outdatedBackpack(msg):
-		return errNotInstalled("the Backpack on that server is too old to be managed " +
+		return errNotInstalled("the HoneyWeb Tunnel on that server is too old to be managed " +
 			"from this panel")
 	}
 	return err
@@ -340,7 +340,7 @@ func (r *SSHRunner) Install(name string) (string, error) {
 	}
 	out, err := runLong(c, installCommand(installerURL()))
 	if err != nil {
-		return string(out), fmt.Errorf("installing Backpack on %s failed: %w", name, err)
+		return string(out), fmt.Errorf("installing HoneyWeb Tunnel on %s failed: %w", name, err)
 	}
 	return string(out), nil
 }
@@ -378,7 +378,7 @@ func (r *SSHRunner) Upgrade(name string) (string, error) {
 	}
 	out, err := runLong(c, upgradeCommand(installerURL(), app.BinPath))
 	if err != nil {
-		return string(out), fmt.Errorf("upgrading Backpack on %s failed: %w", name, err)
+		return string(out), fmt.Errorf("upgrading HoneyWeb Tunnel on %s failed: %w", name, err)
 	}
 	return string(out), nil
 }

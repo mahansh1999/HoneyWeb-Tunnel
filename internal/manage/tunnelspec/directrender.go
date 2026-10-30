@@ -56,7 +56,7 @@ func (s DirectSpec) Render() string {
 	var b strings.Builder
 
 	b.WriteString("# Direct tunnel — the Iran server dials out to kharej.\n")
-	b.WriteString("# Created by the Backpack setup wizard. Both ends must share the token.\n")
+	b.WriteString("# Created by the HoneyWeb Tunnel setup wizard. Both ends must share the token.\n")
 	b.WriteString("#\n")
 	if s.Side == SideIran {
 		b.WriteString("# This is the IRAN side: it exposes the ports and dials out, so it\n")
@@ -195,7 +195,7 @@ func (s L3Spec) Render() string {
 	var b strings.Builder
 
 	b.WriteString("# Full IP tunnel (layer 3) — a private network between the two servers.\n")
-	b.WriteString("# Created by the Backpack setup wizard. Both ends must share the token,\n")
+	b.WriteString("# Created by the HoneyWeb Tunnel setup wizard. Both ends must share the token,\n")
 	b.WriteString("# the carrier, and each other's tunnel addresses.\n")
 	b.WriteString("#\n")
 	b.WriteString("# Needs root: it creates a TUN network interface.\n")
