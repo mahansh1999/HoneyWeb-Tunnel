@@ -9,35 +9,50 @@ maintained by HoneyWeb. [فارسی](README_FA.md)
 > HoneyWeb Tunnel is a modified version of BackPack, licensed under AGPL-3.0 (see `LICENSE`, `NOTICE`,
 > `TRADEMARK.md`). BackPack's data plane is derived from Backhaul by Musixal (AGPL-3.0).
 
-## Install
+## Install (two commands)
 
-On the entry server (as root):
-
-```bash
-curl -fsSLO https://github.com/mahansh1999/HoneyWeb-Tunnel/releases/latest/download/install.sh
-bash install.sh server --transport wssmux --tunnel-port 9090 --port 540
-```
-
-The server install prints the exact client command, including the token. On the exit server (as root):
+**1. On the Iran (entry) server**, as root:
 
 ```bash
-curl -fsSLO https://github.com/mahansh1999/HoneyWeb-Tunnel/releases/latest/download/install.sh
-bash install.sh client --transport wssmux --server ENTRY_IP:9090 --token TOKEN
+bash <(curl -fsSL https://github.com/mahansh1999/HoneyWeb-Tunnel/releases/latest/download/iran.sh)
 ```
 
-For a private repository set `GITHUB_TOKEN` before running the installer, or copy the release files to the
-server and pass `--binary ./hwtunnel-linux-amd64` (the installer verifies it against `SHA256SUMS` next to it).
+The script asks for three things and installs everything else itself:
+- **Transport:** how the two servers talk. `wssmux` and `tcpmux` are the HoneyWeb Recommended choices.
+- **Tunnel port:** the port on this server that the foreign server connects to.
+- **User ports:** the ports users connect to.
+  - `443` goes to the same port on the foreign server.
+  - `443=8443` goes to port 8443 there.
+  - `443,8443` sets several ports at once.
 
-| Command | What it does |
+At the end it prints a **setup link** (`hwt://...`) and one command that uses it.
+
+**2. On the foreign (exit) server**, as root, run that command. It asks nothing; it installs and connects by itself:
+
+```bash
+bash <(curl -fsSL https://github.com/mahansh1999/HoneyWeb-Tunnel/releases/latest/download/kharej.sh) hwt://...
+```
+
+- The link holds the Iran server's address, the transport, the user ports, the capacity and the token, plus a
+  checksum. A link that was cut short in a paste is refused.
+- **Capacity defaults** (from HoneyWeb's production peaks): `wssmux` pool 896 (7168 concurrent connections),
+  `tcpmux`/`wsmux` 512 (4096). Set your own with `iran.sh --pool N` or `kharej.sh LINK --pool N`.
+- **Keep the link private.** It contains the tunnel token.
+
+| Transport | |
 |---|---|
-| `install.sh server ...` / `client ...` | New tunnel with the HoneyWeb Recommended profile. Stops before writing anything if a port is in use or the name exists. |
-| `install.sh upgrade` | Replaces the binary only. Configs are never rewritten. |
-| `install.sh rollback` | Back to the previous binary. |
-| `install.sh status` / `uninstall --name N` | |
+| `wssmux` | WebSocket + TLS, multiplexed (Recommended) |
+| `tcpmux` | TCP, multiplexed (Recommended) |
+| `wsmux` | WebSocket, multiplexed, no TLS |
+| `tcp`, `ws`, `wss` | one tunnel connection per user connection |
+| `stealth` | TCP with Noise encryption, no TLS fingerprint |
+| `kcp`, `quic` | over UDP, for lossy paths |
 
-Options: `--name`, `--pool N` (client capacity, default 512 sessions = 4096 concurrent connections),
-`--allow-from IP` (server: accept the tunnel port only from the client's IP; recommended for `tcpmux`),
-`--version TAG`, `--binary FILE`.
+- **Safety:** a port that is in use is asked again. Existing services and tunnels are never changed.
+- **Manage:** `bash iran.sh status`, `bash iran.sh uninstall --name NAME`, `bash iran.sh upgrade`. `kharej.sh` takes the same commands.
+- **Private repository:** `export GITHUB_TOKEN=...` first. Alternatively, put the release files in one folder on the server and run `bash iran.sh` from there.
+- **Without questions:** `iran.sh --transport wssmux --tunnel-port 9090 --port 443 --yes`.
+- **Lower-level installer:** `install.sh server|client ...` (see the top of the file).
 
 ## HoneyWeb Recommended
 

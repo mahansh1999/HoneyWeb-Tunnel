@@ -9,8 +9,10 @@
 #     bash install.sh upgrade [--version TAG | --binary FILE]   # binary only, configs are never rewritten
 #     bash install.sh rollback                                  # back to the previous binary
 #     bash install.sh status
-#   --token-file FILE reads the token from FILE (then deletes it) and never prints it (used by remote installs).
 #     bash install.sh uninstall --name NAME
+#   --transport: wssmux, tcpmux (Recommended, proven in production), wsmux, tcp, ws, wss, stealth, kcp, quic (UDP).
+#   --token-file FILE reads the token from FILE (then deletes it) and never prints it (used by remote installs).
+#   iran.sh and kharej.sh next to this file are interactive wizards around it.
 #
 # Layout: /opt/hwtunnel/bin/hwtunnel-<version> (+ symlink hwtunnel), /opt/hwtunnel/etc/<name>.toml,
 # unit hwtunnel-<name>.service running as the unprivileged user hwtunnel, hardened, LimitNOFILE=1048576.
@@ -23,7 +25,7 @@
 set -euo pipefail
 umask 022   # a strict caller umask (077) would make /opt/hwtunnel unreadable for the service user
 
-VERSION_DEFAULT="hw-v1.0.0"
+VERSION_DEFAULT="hw-v1.1.0"
 REPO_DEFAULT="mahansh1999/HoneyWeb-Tunnel"
 ROOT=/opt/hwtunnel
 BIN_DIR=$ROOT/bin
@@ -35,7 +37,16 @@ PERF_COMMON='nodelay = true
 mux_streambuffer = 2097152
 mux_recievebuffer = 16777216'
 MUX_CON=8              # streams per session on the server (engine default, written explicitly)
-POOL_DEFAULT=512       # sessions on the client: 512 x 8 = 4096 concurrent streams
+# Default capacity per transport, from HoneyWeb production peaks (2026-10-31: WSSMUX 5312 and TCPMUX 2464 concurrent
+# streams at the evening peak): wssmux 896 sessions = 7168 streams, tcpmux/wsmux 512 = 4096. tcp/udp families keep
+# 64 connections ready (engine default 8). --pool overrides.
+pool_default() { case "$1" in wssmux) echo 896;; tcpmux|wsmux) echo 512;; *) echo 64;; esac; }
+
+# Transport families. mux: many user connections share one session (the Recommended profile, proven in
+# production). tcp: one tunnel connection per user connection. udp: KCP or QUIC over UDP, with the engine's own
+# tuning (nodelay and the smux windows are TCP/mux settings and are not written for them).
+TRANSPORTS="wssmux tcpmux wsmux tcp ws wss stealth kcp quic"
+family() { case "$1" in tcpmux|wsmux|wssmux) echo mux;; tcp|ws|wss|stealth) echo tcp;; kcp|quic) echo udp;; *) echo none;; esac; }
 
 die() { echo "install.sh: $*" >&2; exit 1; }
 say() { echo "==> $*" >&2; }
@@ -46,7 +57,7 @@ usage() { sed -n '2,13p' "$0"; exit 2; }
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT   # downloads and checks happen here; removed on any exit
 cmd=${1:-}; [ -n "$cmd" ] || usage; shift
 
-transport=""; tunnel_port=""; ports=(); name=""; token=""; server=""; pool=$POOL_DEFAULT
+transport=""; tunnel_port=""; ports=(); name=""; token=""; server=""; pool=""
 version=$VERSION_DEFAULT; repo=$REPO_DEFAULT; binary=""; allow_from=""; yes=0; token_quiet=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -80,6 +91,7 @@ arch() {
 need() { for c in "$@"; do command -v "$c" >/dev/null 2>&1 || die "missing dependency: $c"; done; }
 
 port_in_use() { ss -Htln "( sport = :$1 )" 2>/dev/null | grep -q .; }
+udp_in_use() { ss -Huln "( sport = :$1 )" 2>/dev/null | grep -q .; }
 
 # Download (or take) the binary for this architecture and verify it against SHA256SUMS of the release.
 fetch_binary() {
@@ -121,7 +133,7 @@ install_binary() {
   # A new tunnel next to existing ones must not switch their binary: reuse the same build or stop.
   if [ "$cmd" != upgrade ] && [ -L "$BIN_DIR/hwtunnel" ]; then
     local cur; cur=$(readlink "$BIN_DIR/hwtunnel")
-    if [ "$cur" = "hwtunnel-$tag" ] && cmp -s "$src" "$BIN_DIR/$cur"; then
+    if cmp -s "$src" "$BIN_DIR/$cur"; then   # same build, whatever release tag it came with
       say "binary: $BIN_DIR/hwtunnel -> $cur already installed (same build)"; return
     fi
     die "another HoneyWeb Tunnel binary is active ($cur) and other tunnels use it; nothing changed (run 'install.sh upgrade' first)"
@@ -181,17 +193,17 @@ write_config() { # name content
   mv "$f.new" "$f"
 }
 
-firewall() { # name port source
+firewall() { # name port source proto
   need nft
-  local n=$1 p=$2 src=$3 file=$ETC/$1.nft
+  local n=$1 p=$2 src=$3 proto=${4:-tcp} file=$ETC/$1.nft
   cat > "$file" <<EOF
 table inet hwtunnel_$n
 delete table inet hwtunnel_$n
 table inet hwtunnel_$n {
   chain input {
     type filter hook input priority filter; policy accept;
-    tcp dport $p ip saddr != $src counter drop comment "hwtunnel $n: tunnel port only from $src"
-    meta nfproto ipv6 tcp dport $p counter drop comment "hwtunnel $n: no IPv6 to the tunnel port"
+    $proto dport $p ip saddr != $src counter drop comment "hwtunnel $n: tunnel port only from $src"
+    meta nfproto ipv6 $proto dport $p counter drop comment "hwtunnel $n: no IPv6 to the tunnel port"
   }
 }
 EOF
@@ -212,45 +224,57 @@ WantedBy=multi-user.target
 EOF
 }
 
-health() { # name role port
-  local n=$1 role=$2 p=$3 i
-  for i in $(seq 1 20); do
+health() { # name role port family
+  local n=$1 role=$2 p=$3 fam=$4 i since
+  since=$(systemctl show -p ActiveEnterTimestamp --value "hwtunnel-$n")
+  up() { journalctl -u "hwtunnel-$n" --since "$since" --no-pager -o cat 2>/dev/null | grep -q "control channel established"; }
+  for i in $(seq 1 25); do
     sleep 1
     systemctl is-active --quiet "hwtunnel-$n" || continue
-    if [ "$role" = server ]; then port_in_use "$p" && break
-    else [ "$(ss -Htn state established "( dport = :$p )" | wc -l)" -ge 1 ] && break; fi
+    if [ "$role" = server ]; then
+      if [ "$fam" = udp ]; then udp_in_use "$p" && break; else port_in_use "$p" && break; fi
+    else up && break; fi
   done
   # A new tunnel that is not healthy is stopped and disabled (no restart loop); its files stay for diagnosis.
   local stop="systemctl disable --now hwtunnel-$n >/dev/null 2>&1; journalctl -u hwtunnel-$n -n 20 --no-pager"
-  systemctl is-active --quiet "hwtunnel-$n" || { eval "$stop"; die "hwtunnel-$n is not running (stopped; remove with: install.sh uninstall --name $n)"; }
+  local rm="(stopped; remove with: install.sh uninstall --name $n)"
+  systemctl is-active --quiet "hwtunnel-$n" || { eval "$stop"; die "hwtunnel-$n is not running $rm"; }
   if [ "$role" = server ]; then
-    port_in_use "$p" || { eval "$stop"; die "hwtunnel-$n runs but does not listen on $p (stopped; remove with: install.sh uninstall --name $n)"; }
-    say "server up: listening on $p; waiting for the client to connect"
+    if [ "$fam" = udp ]; then udp_in_use "$p"; else port_in_use "$p"; fi || { eval "$stop"; die "hwtunnel-$n runs but does not listen on $p $rm"; }
+    say "server up: listening on $p/$([ "$fam" = udp ] && echo udp || echo tcp); waiting for the client to connect"
   else
-    local s; s=$(ss -Htn state established "( dport = :$p )" | wc -l)
-    [ "$s" -ge 1 ] || { eval "$stop"; die "client could not reach the server on port $p (stopped; remove with: install.sh uninstall --name $n)"; }
-    say "client up: $s tunnel connections established"
+    up || { eval "$stop"; die "client could not reach the server on port $p (no control channel within 25 s) $rm"; }
+    local s=""; [ "$fam" = udp ] || s=" ($(ss -Htn state established "( dport = :$p )" | wc -l) tunnel connections)"
+    say "client up: control channel established$s"
   fi
 }
 
 case "$cmd" in
   server|client)
-    need systemctl ss sha256sum install
-    [ "$transport" = wssmux ] || [ "$transport" = tcpmux ] || die "--transport must be wssmux or tcpmux"
+    need systemctl ss sha256sum install journalctl
+    fam=$(family "$transport")
+    [ "$fam" != none ] || die "--transport must be one of: $TRANSPORTS"
     name=${name:-$transport}
     [[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]] || die "bad --name"
+    [ -n "$pool" ] || pool=$(pool_default "$transport")
     [[ "$pool" =~ ^[0-9]+$ ]] && [ "$pool" -ge 8 ] && [ "$pool" -le 8192 ] || die "--pool must be 8..8192"
     [ ! -e "$ETC/$name.toml" ] || die "$ETC/$name.toml already exists; nothing changed (uninstall or pick --name)"
     [ ! -e "/etc/systemd/system/hwtunnel-$name.service" ] || die "unit hwtunnel-$name already exists; nothing changed"
-    perf="$PERF_COMMON"; [ "$transport" = wssmux ] && perf="$perf
-mux_version = 2"
+    case "$fam" in
+      mux) perf="$PERF_COMMON"; case "$transport" in wsmux|wssmux) perf="$perf
+mux_version = 2";; esac;;
+      tcp) perf="nodelay = true";;
+      udp) perf="";;
+    esac
     if [ "$cmd" = server ]; then
-      [[ "$tunnel_port" =~ ^[0-9]+$ ]] || die "--tunnel-port is required"
+      [[ "$tunnel_port" =~ ^[0-9]+$ ]] && [ "$tunnel_port" -ge 1 ] && [ "$tunnel_port" -le 65535 ] || die "--tunnel-port is required (1-65535)"
       [ ${#ports[@]} -gt 0 ] || die "at least one --port is required"
-      port_in_use "$tunnel_port" && die "port $tunnel_port is already in use; nothing changed"
+      if [ "$fam" = udp ]; then udp_in_use "$tunnel_port" && die "UDP port $tunnel_port is already in use; nothing changed"
+      else port_in_use "$tunnel_port" && die "port $tunnel_port is already in use; nothing changed"; fi
       caps=""
       for m in "${ports[@]}"; do
         lp=$(listen_port "$m"); [[ "$lp" =~ ^[0-9]+$ ]] || die "bad --port $m"
+        [ "$fam" != udp ] && [ "$lp" = "$tunnel_port" ] && die "user port $lp is the tunnel port"
         port_in_use "$lp" && die "port $lp is already in use; nothing changed"
         [ "$lp" -lt 1024 ] && caps=CAP_NET_BIND_SERVICE
       done
@@ -258,14 +282,15 @@ mux_version = 2"
       [ -n "$token" ] || token=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
       ensure_user; install_binary "$(fetch_binary)" "$version"
       tls=""
-      if [ "$transport" = wssmux ]; then
+      case "$transport" in wss|wssmux)
         need openssl
         openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
           -subj "/CN=honeyweb-tunnel" -keyout "$ETC/$name.key" -out "$ETC/$name.crt" 2>/dev/null
         chown root:"$USER_NAME" "$ETC/$name.key" "$ETC/$name.crt"; chmod 0640 "$ETC/$name.key" "$ETC/$name.crt"
         tls="tls_cert = \"$ETC/$name.crt\"
-tls_key = \"$ETC/$name.key\""
-      fi
+tls_key = \"$ETC/$name.key\"";;
+      esac
+      muxcon=""; [ "$fam" = mux ] && muxcon="mux_con = $MUX_CON"
       plist=$(printf '"%s", ' "${ports[@]}"); plist="[${plist%, }]"
       write_config "$name" "[server]
 bind_addr = \"0.0.0.0:$tunnel_port\"
@@ -275,15 +300,16 @@ skip_optz = true
 log_level = \"info\"
 $tls
 $perf
-mux_con = $MUX_CON
+$muxcon
 ports = $plist"
       write_unit "$name" "$caps" "server"
-      if [ -n "$allow_from" ]; then firewall "$name" "$tunnel_port" "$allow_from"; fi
+      proto=tcp; [ "$fam" = udp ] && proto=udp
+      if [ -n "$allow_from" ]; then firewall "$name" "$tunnel_port" "$allow_from" "$proto"; fi
       systemctl daemon-reload
       [ -n "$allow_from" ] && systemctl enable --now "hwtunnel-$name-firewall" >/dev/null
       systemctl enable --now "hwtunnel-$name" >/dev/null
-      health "$name" server "$tunnel_port"
-      echo "HWT_RESULT ok role=server name=$name transport=$transport tunnel_port=$tunnel_port ports=${ports[*]} mux_con=$MUX_CON"
+      health "$name" server "$tunnel_port" "$fam"
+      echo "HWT_RESULT ok role=server name=$name transport=$transport tunnel_port=$tunnel_port ports=${ports[*]}${muxcon:+ mux_con=$MUX_CON}"
       if [ "$token_quiet" = 0 ]; then
         echo
         echo "Install the client on the foreign server with:"
@@ -304,9 +330,13 @@ log_level = \"info\"
 $perf"
       write_unit "$name" "" "client"
       systemctl daemon-reload; systemctl enable --now "hwtunnel-$name" >/dev/null
-      health "$name" client "${server##*:}"
-      say "capacity: connection_pool $pool x mux_con $MUX_CON = $((pool * MUX_CON)) concurrent streams"
-      echo "HWT_RESULT ok role=client name=$name transport=$transport server=$server pool=$pool streams=$((pool * MUX_CON))"
+      health "$name" client "${server##*:}" "$fam"
+      cap="pool=$pool"
+      if [ "$fam" = mux ]; then
+        say "capacity: connection_pool $pool x mux_con $MUX_CON = $((pool * MUX_CON)) concurrent streams"
+        cap="$cap streams=$((pool * MUX_CON))"
+      fi
+      echo "HWT_RESULT ok role=client name=$name transport=$transport server=$server $cap"
     fi
     ;;
   upgrade)
