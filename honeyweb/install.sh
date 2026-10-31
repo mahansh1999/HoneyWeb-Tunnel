@@ -21,6 +21,7 @@
 # name, or a missing dependency stops the install before anything is written. Only files under
 # /opt/hwtunnel, the hwtunnel-<name> unit(s) and (with --allow-from) one nftables table of its own are created.
 set -euo pipefail
+umask 022   # a strict caller umask (077) would make /opt/hwtunnel unreadable for the service user
 
 VERSION_DEFAULT="hw-v1.0.0"
 REPO_DEFAULT="mahansh1999/HoneyWeb-Tunnel"
@@ -42,6 +43,7 @@ say() { echo "==> $*" >&2; }
 usage() { sed -n '2,13p' "$0"; exit 2; }
 
 [ "$(id -u)" = 0 ] || die "run as root"
+WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT   # downloads and checks happen here; removed on any exit
 cmd=${1:-}; [ -n "$cmd" ] || usage; shift
 
 transport=""; tunnel_port=""; ports=(); name=""; token=""; server=""; pool=$POOL_DEFAULT
@@ -82,7 +84,7 @@ port_in_use() { ss -Htln "( sport = :$1 )" 2>/dev/null | grep -q .; }
 # Download (or take) the binary for this architecture and verify it against SHA256SUMS of the release.
 fetch_binary() {
   local a out sums
-  a=$(arch); out=$(mktemp -d)
+  a=$(arch); out=$WORK
   if [ -n "$binary" ]; then
     cp "$binary" "$out/hwtunnel-linux-$a"
     if [ -f "$(dirname "$binary")/SHA256SUMS" ]; then cp "$(dirname "$binary")/SHA256SUMS" "$out/"; fi
@@ -105,7 +107,7 @@ fetch_binary() {
     fi
   fi
   if [ -f "$out/SHA256SUMS" ]; then
-    (cd "$out" && grep " hwtunnel-linux-$a\$" SHA256SUMS | sha256sum -c --quiet -) || die "checksum mismatch for hwtunnel-linux-$a"
+    (cd "$out" && grep -E " [*]?hwtunnel-linux-$a$" SHA256SUMS | sha256sum -c --quiet -) || die "checksum mismatch for hwtunnel-linux-$a"
     say "binary verified: $(sha256sum "$out/hwtunnel-linux-$a" | cut -c1-16)…"
   else
     [ $yes = 1 ] || die "no SHA256SUMS next to $binary; pass --yes to install an unverified binary"
@@ -116,11 +118,21 @@ fetch_binary() {
 
 install_binary() {
   local src=$1 tag=$2
-  install -d -m 0755 "$BIN_DIR"
+  # A new tunnel next to existing ones must not switch their binary: reuse the same build or stop.
+  if [ "$cmd" != upgrade ] && [ -L "$BIN_DIR/hwtunnel" ]; then
+    local cur; cur=$(readlink "$BIN_DIR/hwtunnel")
+    if [ "$cur" = "hwtunnel-$tag" ] && cmp -s "$src" "$BIN_DIR/$cur"; then
+      say "binary: $BIN_DIR/hwtunnel -> $cur already installed (same build)"; return
+    fi
+    die "another HoneyWeb Tunnel binary is active ($cur) and other tunnels use it; nothing changed (run 'install.sh upgrade' first)"
+  fi
+  install -d -m 0755 "$ROOT" "$BIN_DIR"
   install -m 0755 "$src" "$BIN_DIR/hwtunnel-$tag.new"
   "$BIN_DIR/hwtunnel-$tag.new" -v >/dev/null || die "the downloaded binary does not run on this host"
   mv "$BIN_DIR/hwtunnel-$tag.new" "$BIN_DIR/hwtunnel-$tag"
-  if [ -L "$BIN_DIR/hwtunnel" ]; then readlink "$BIN_DIR/hwtunnel" > "$BIN_DIR/.previous"; fi
+  if [ -L "$BIN_DIR/hwtunnel" ] && [ "$(readlink "$BIN_DIR/hwtunnel")" != "hwtunnel-$tag" ]; then
+    readlink "$BIN_DIR/hwtunnel" > "$BIN_DIR/.previous"
+  fi
   ln -sfn "hwtunnel-$tag" "$BIN_DIR/hwtunnel"
   say "binary: $BIN_DIR/hwtunnel -> hwtunnel-$tag ($("$BIN_DIR/hwtunnel" -v | head -1))"
 }
@@ -163,7 +175,7 @@ EOF
 
 write_config() { # name content
   local f=$ETC/$1.toml
-  umask 077; printf '%s\n' "$2" > "$f.new"
+  (umask 077; printf '%s\n' "$2" > "$f.new")
   chown root:"$USER_NAME" "$f.new"; chmod 0640 "$f.new"
   "$BIN_DIR/hwtunnel" check -c "$f.new" >/dev/null || { rm -f "$f.new"; die "generated config failed hwtunnel check"; }
   mv "$f.new" "$f"
@@ -208,13 +220,15 @@ health() { # name role port
     if [ "$role" = server ]; then port_in_use "$p" && break
     else [ "$(ss -Htn state established "( dport = :$p )" | wc -l)" -ge 1 ] && break; fi
   done
-  systemctl is-active --quiet "hwtunnel-$n" || { journalctl -u "hwtunnel-$n" -n 20 --no-pager; die "hwtunnel-$n is not running"; }
+  # A new tunnel that is not healthy is stopped and disabled (no restart loop); its files stay for diagnosis.
+  local stop="systemctl disable --now hwtunnel-$n >/dev/null 2>&1; journalctl -u hwtunnel-$n -n 20 --no-pager"
+  systemctl is-active --quiet "hwtunnel-$n" || { eval "$stop"; die "hwtunnel-$n is not running (stopped; remove with: install.sh uninstall --name $n)"; }
   if [ "$role" = server ]; then
-    port_in_use "$p" || die "hwtunnel-$n runs but does not listen on $p"
+    port_in_use "$p" || { eval "$stop"; die "hwtunnel-$n runs but does not listen on $p (stopped; remove with: install.sh uninstall --name $n)"; }
     say "server up: listening on $p; waiting for the client to connect"
   else
     local s; s=$(ss -Htn state established "( dport = :$p )" | wc -l)
-    [ "$s" -ge 1 ] || { journalctl -u "hwtunnel-$n" -n 20 --no-pager; die "client could not reach the server on port $p"; }
+    [ "$s" -ge 1 ] || { eval "$stop"; die "client could not reach the server on port $p (stopped; remove with: install.sh uninstall --name $n)"; }
     say "client up: $s tunnel connections established"
   fi
 }
