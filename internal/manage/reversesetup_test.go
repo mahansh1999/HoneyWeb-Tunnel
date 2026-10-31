@@ -322,7 +322,7 @@ func TestTheReverseSummaryIsShortAndCarriesTheLink(t *testing.T) {
 		"Reverse TCP", "0.0.0.0:443", "203.0.113.9:443", "443, 8080=2096  (TCP + UDP)",
 		"443 → 127.0.0.1:443", "8080 → 127.0.0.1:2096", "Turbo",
 		"Setup Link (sudo backpack → Setup Kharej → Reverse → Setup Link):",
-		"Install BackPack And Set Up This Tunnel (Kharej Without BackPack, As Root):",
+		"Install HoneyWeb Tunnel And Set Up This Tunnel (Kharej Without HoneyWeb Tunnel, As Root):",
 		"install.sh) link apply 'backpack://", link,
 	} {
 		if !strings.Contains(out, want) {
