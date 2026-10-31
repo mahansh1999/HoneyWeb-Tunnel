@@ -34,7 +34,7 @@ backups in `/root/BackPack/backups`, tunnel configs in `/etc/backpack`. See
 Download the release on any machine **with** internet, copy it to the server, and
 install it there. Nothing is fetched from the VPS.
 
-![Offline install](../img/offline-install.gif)
+
 
 From the [releases page](https://github.com/AminMGMT/BackPack/releases/latest),
 download the archive for the server's architecture — run `uname -m` on it:
