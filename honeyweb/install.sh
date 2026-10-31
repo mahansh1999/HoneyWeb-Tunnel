@@ -9,6 +9,7 @@
 #     bash install.sh upgrade [--version TAG | --binary FILE]   # binary only, configs are never rewritten
 #     bash install.sh rollback                                  # back to the previous binary
 #     bash install.sh status
+#   --token-file FILE reads the token from FILE (then deletes it) and never prints it (used by remote installs).
 #     bash install.sh uninstall --name NAME
 #
 # Layout: /opt/hwtunnel/bin/hwtunnel-<version> (+ symlink hwtunnel), /opt/hwtunnel/etc/<name>.toml,
@@ -44,7 +45,7 @@ usage() { sed -n '2,13p' "$0"; exit 2; }
 cmd=${1:-}; [ -n "$cmd" ] || usage; shift
 
 transport=""; tunnel_port=""; ports=(); name=""; token=""; server=""; pool=$POOL_DEFAULT
-version=$VERSION_DEFAULT; repo=$REPO_DEFAULT; binary=""; allow_from=""; yes=0
+version=$VERSION_DEFAULT; repo=$REPO_DEFAULT; binary=""; allow_from=""; yes=0; token_quiet=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --transport) transport=$2; shift 2;;
@@ -52,6 +53,8 @@ while [ $# -gt 0 ]; do
     --port) IFS=, read -ra add <<<"$2"; ports+=("${add[@]}"); shift 2;;
     --name) name=$2; shift 2;;
     --token) token=$2; shift 2;;
+    --token-file) token=$(tr -d ' 
+' < "$2"); rm -f "$2"; token_quiet=1; shift 2;;
     --server) server=$2; shift 2;;
     --pool) pool=$2; shift 2;;
     --version) version=$2; shift 2;;
@@ -266,10 +269,13 @@ ports = $plist"
       [ -n "$allow_from" ] && systemctl enable --now "hwtunnel-$name-firewall" >/dev/null
       systemctl enable --now "hwtunnel-$name" >/dev/null
       health "$name" server "$tunnel_port"
-      echo
-      echo "Install the client on the foreign server with:"
-      echo "  bash install.sh client --transport $transport --server <THIS_SERVER_IP>:$tunnel_port --token $token --name $name"
-      echo "(the token is shown only now; it is stored in $ETC/$name.toml, readable by root and hwtunnel only)"
+      echo "HWT_RESULT ok role=server name=$name transport=$transport tunnel_port=$tunnel_port ports=${ports[*]} mux_con=$MUX_CON"
+      if [ "$token_quiet" = 0 ]; then
+        echo
+        echo "Install the client on the foreign server with:"
+        echo "  bash install.sh client --transport $transport --server <THIS_SERVER_IP>:$tunnel_port --token $token --name $name"
+        echo "(the token is shown only now; it is stored in $ETC/$name.toml, readable by root and hwtunnel only)"
+      fi
     else
       [[ "$server" =~ ^[^:]+:[0-9]+$ ]] || die "--server HOST:PORT is required"
       [ -n "$token" ] || die "--token is required (printed by the server install)"
@@ -286,6 +292,7 @@ $perf"
       systemctl daemon-reload; systemctl enable --now "hwtunnel-$name" >/dev/null
       health "$name" client "${server##*:}"
       say "capacity: connection_pool $pool x mux_con $MUX_CON = $((pool * MUX_CON)) concurrent streams"
+      echo "HWT_RESULT ok role=client name=$name transport=$transport server=$server pool=$pool streams=$((pool * MUX_CON))"
     fi
     ;;
   upgrade)
