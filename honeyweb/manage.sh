@@ -74,18 +74,35 @@ healthy() { local n=$1 before=$2 i need m p ok
     [ "${HWT_MANAGE_FAIL_HEALTH:-0}" = 1 ] && ok=0   # tests only: force the rollback path
     [ $ok = 1 ] && return 0
   done; return 1; }
-# apply NAME NEWFILE MODE(reload|restart) DESCRIPTION
-apply() { local n=$1 new=$2 mode=$3 what=$4 before u
+# apply NAME NEWFILE MODE(reload|restart) DESCRIPTION [live]
+# "live": an engine with zero-downtime reloads (HoneyWeb engine, cmd/live.go) takes this change without restarting
+# the tunnel; the engine log then says "applied without a restart". An older engine restarts it instead.
+apply() { local n=$1 new=$2 mode=$3 what=$4 lv=${5:-} before u since how
   chown root:hwtunnel "$new"; chmod 0640 "$new"
   "$BIN" check -c "$new" >/dev/null 2>&1 || { "$BIN" check -c "$new" 2>&1 | tail -3; rm -f "$new"; logtx "$n" "$OP" invalid; die "the new config failed hwtunnel check; nothing changed"; }
   before=$(sessions "$n"); u=$(users "$n")
-  confirm "$what. Tunnel $n has $before tunnel sessions and $u active user connections; they are cut for about 2-5 s while it $([ "$mode" = restart ] && echo restarts || echo reloads). Other tunnels are not affected."
+  if [ "$mode" = reload ] && [ "$lv" = live ]; then
+    confirm "$what. Tunnel $n has $before tunnel sessions and $u active user connections. A zero-downtime engine applies this live and cuts none of them; an older engine reloads the tunnel and cuts them for about 2-5 s. Other tunnels are not affected."
+  else
+    confirm "$what. Tunnel $n has $before tunnel sessions and $u active user connections; they are cut for about 2-5 s while it $([ "$mode" = restart ] && echo restarts || echo reloads). Other tunnels are not affected."
+  fi
+  since=$(date '+%Y-%m-%d %H:%M:%S')
   mv "$new" "$(cfg "$n")"
   [ "$mode" = restart ] && { systemctl daemon-reload; systemctl restart "hwtunnel-$n"; }
-  if healthy "$n" "$before"; then say "applied (tx $TX): sessions $(sessions "$n"), service $(systemctl is-active "hwtunnel-$n")"; logtx "$n" "$OP" ok; return 0; fi
+  if healthy "$n" "$before"; then
+    how="restarted"; [ "$mode" = reload ] && how="reloaded (generation restarted)"
+    if [ "$mode" = reload ]; then local i; for i in 1 2 3 4 5 6; do
+      journalctl -u "hwtunnel-$n" --since "$since" --no-pager -o cat 2>/dev/null | grep -q "applied without a restart" && { how="applied live, no restart: open connections kept"; break; }
+      journalctl -u "hwtunnel-$n" --since "$since" --no-pager -o cat 2>/dev/null | grep -q "restarting the tunnel" && break; sleep 1; done; fi
+    say "applied (tx $TX): $how; sessions $(sessions "$n"), service $(systemctl is-active "hwtunnel-$n")"; logtx "$n" "$OP" "ok:${how%%:*}"; return 0; fi
   echo "$(c 31 '!!') unhealthy after the change; rolling back to tx $TX"
-  cp -p "$BK/$n.$TX.toml" "$(cfg "$n")"; cp -p "$BK/$n.$TX.service" "/etc/systemd/system/hwtunnel-$n.service"
-  systemctl daemon-reload; systemctl restart "hwtunnel-$n"
+  if [ "$mode" = reload ] && [ "$lv" = live ] && cmp -s "$BK/$n.$TX.service" "/etc/systemd/system/hwtunnel-$n.service"; then
+    # the previous file goes back the same way the change came: live on a zero-downtime engine, no restart forced
+    cp -p "$BK/$n.$TX.toml" "$(cfg "$n").rb-$TX" && mv "$(cfg "$n").rb-$TX" "$(cfg "$n")"
+  else
+    cp -p "$BK/$n.$TX.toml" "$(cfg "$n")"; cp -p "$BK/$n.$TX.service" "/etc/systemd/system/hwtunnel-$n.service"
+    systemctl daemon-reload; systemctl restart "hwtunnel-$n"
+  fi
   if HWT_MANAGE_FAIL_HEALTH=0 healthy "$n" "$before"; then logtx "$n" "$OP" rolled-back; die "change rolled back; the tunnel runs the previous config again"
   else logtx "$n" "$OP" rollback-unhealthy; die "rolled back, but the tunnel is still unhealthy: journalctl -u hwtunnel-$n"; fi; }
 
@@ -138,7 +155,7 @@ cmd_ports() { local n=$1 sub=${2:-list} arg=${3:-} cur new m p seen="" caps=0 lo
   if [ $caps = 1 ] && ! grep -q '^AmbientCapabilities=CAP_NET_BIND_SERVICE' "/etc/systemd/system/hwtunnel-$n.service"; then
     sed -i -E 's/^CapabilityBoundingSet=.*/CapabilityBoundingSet=CAP_NET_BIND_SERVICE/; s/^AmbientCapabilities=.*/AmbientCapabilities=CAP_NET_BIND_SERVICE/' "/etc/systemd/system/hwtunnel-$n.service"; mode=restart; fi
   [ -n "$lost" ] && echo "$(c 33 warning:) port(s)$lost will stop listening: clients configured for them will no longer connect"
-  apply "$n" "$f" "$mode" "ports $(echo "$cur" | tr , ' ') -> $(echo "$new" | tr , ' ')"; }
+  apply "$n" "$f" "$mode" "ports $(echo "$cur" | tr , ' ') -> $(echo "$new" | tr , ' ')" live; }
 cmd_pool() { local n=$1 v=${2:-} dec=${3:-} cur f
   exists "$n"; [ "$(role "$n")" = client ] || die "connection_pool is set on the foreign (client) side; run this there"
   [[ "$v" =~ ^[0-9]+$ ]] && [ "$v" -ge 8 ] && [ "$v" -le 8192 ] || die "pool must be 8..8192"
@@ -148,7 +165,8 @@ cmd_pool() { local n=$1 v=${2:-} dec=${3:-} cur f
   NAME=$n; OP="pool:$cur->$v"; begin "$n"; f="$(cfg "$n").new-$TX"; cp -p "$(cfg "$n")" "$f"
   if grep -q '^connection_pool' "$f"; then sed -i -E "s/^connection_pool[[:space:]]*=.*/connection_pool = $v/" "$f"; else sed -i "/^\[client\]/a connection_pool = $v" "$f"; fi
   EXPECT=$(( v + 1 ))   # pool sessions + the control channel
-  apply "$n" "$f" reload "connection_pool $cur -> $v ($((v * 8)) streams at mux_con 8)"; }
+  local lv=""; [ "$v" -gt "$cur" ] && lv=live   # a raise is live on a zero-downtime engine; a decrease restarts
+  apply "$n" "$f" reload "connection_pool $cur -> $v ($((v * 8)) streams at mux_con 8)" "$lv"; }
 cmd_profile() { local n=$1 p=${2:-} f t
   exists "$n"; t=$(get "$n" transport); [ "$(family "$t")" = mux ] || die "profiles apply to tcpmux, wsmux and wssmux"
   case "$p" in turbo|default) ;; *) die "profile NAME turbo|default";; esac
