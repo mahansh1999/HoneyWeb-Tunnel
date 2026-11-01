@@ -143,6 +143,55 @@ func TestLiveForwardsKeepAdmittedConnections(t *testing.T) {
 	listeners.wait(context.Background())
 }
 
+// TestUserPortHandover is the make-before-break handover of a user port from
+// one tunnel to another: with user_port_reuse both bind the port at once, the
+// old one goes away, and the port never stops accepting. Without it the
+// second bind fails as it always did.
+func TestUserPortHandover(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+	addr := "127.0.0.1:" + freePort(t)
+
+	oldCtx, oldStop := context.WithCancel(context.Background())
+	var oldSet listenerSet
+	oldQ := make(chan LocalTCPConn, 64)
+	portForwarder{ctx: oldCtx, ports: []string{addr + "=1"}, queue: oldQ, limits: newLimiter(Limits{}), listeners: &oldSet, log: log, reusePort: true}.run()
+	u := dialUntil(t, addr)
+	defer u.Close()
+	admitted(t, oldQ)
+
+	newCtx, newStop := context.WithCancel(context.Background())
+	defer newStop()
+	var newSet listenerSet
+	newQ := make(chan LocalTCPConn, 64)
+	portForwarder{ctx: newCtx, ports: []string{addr + "=2"}, queue: newQ, limits: newLimiter(Limits{}), listeners: &newSet, log: log, reusePort: true}.run()
+	time.Sleep(200 * time.Millisecond) // the new listener is up
+
+	// the old tunnel goes; every dial from now on must reach the new one
+	oldStop()
+	oldSet.wait(context.Background())
+	for i := 0; i < 20; i++ {
+		c, err := net.DialTimeout("tcp", addr, time.Second)
+		if err != nil {
+			t.Fatalf("dial %d after the handover failed: %v", i, err)
+		}
+		if got := admitted(t, newQ); got.remoteAddr != "2" {
+			t.Fatalf("dial %d reached target %q, want the new tunnel's 2", i, got.remoteAddr)
+		}
+		c.Close()
+	}
+
+	// without reuse a second bind of a held port still fails, as before
+	holdCtx, holdStop := context.WithCancel(context.Background())
+	defer holdStop()
+	var holdSet listenerSet
+	portForwarder{ctx: holdCtx, ports: []string{addr + "=3"}, queue: make(chan LocalTCPConn, 4), limits: newLimiter(Limits{}), listeners: &holdSet, log: log}.run()
+	time.Sleep(200 * time.Millisecond)
+	if _, err := listenTCP(addr, false); err == nil {
+		t.Fatal("a plain bind of a port held with SO_REUSEPORT succeeded; the default must still refuse")
+	}
+}
+
 // TestFixedForwarderUnchanged checks that without a live holder the forwarder
 // binds its mappings exactly as it always did.
 func TestFixedForwarderUnchanged(t *testing.T) {

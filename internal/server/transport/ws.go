@@ -53,25 +53,26 @@ type WsTransport struct {
 }
 
 type WsConfig struct {
-	BindAddr     string
-	SnifferLog   string
-	TLSCertFile  string // Path to the TLS certificate file
-	TLSKeyFile   string // Path to the TLS key file
-	ACMEDomain   string // non-empty switches to Let's Encrypt for this domain
-	ACMEEmail    string
-	ACMECacheDir string
-	Token        string
-	SimpleAuth   bool
-	Ports        []string
-	LivePorts    *live.Ports // optional: mappings changed without a restart (internal/live)
-	AcceptUDP    bool
-	Nodelay      bool
-	Sniffer      bool
-	KeepAlive    time.Duration
-	Heartbeat    time.Duration // in seconds
-	ChannelSize  int
-	WebPort      int
-	Mode         config.TransportType // ws or wss
+	BindAddr      string
+	SnifferLog    string
+	TLSCertFile   string // Path to the TLS certificate file
+	TLSKeyFile    string // Path to the TLS key file
+	ACMEDomain    string // non-empty switches to Let's Encrypt for this domain
+	ACMEEmail     string
+	ACMECacheDir  string
+	Token         string
+	SimpleAuth    bool
+	Ports         []string
+	LivePorts     *live.Ports // optional: mappings changed without a restart (internal/live)
+	UserPortReuse bool        // bind user ports with SO_REUSEPORT (config user_port_reuse)
+	AcceptUDP     bool
+	Nodelay       bool
+	Sniffer       bool
+	KeepAlive     time.Duration
+	Heartbeat     time.Duration // in seconds
+	ChannelSize   int
+	WebPort       int
+	Mode          config.TransportType // ws or wss
 
 	// MSS caps the largest TCP segment the accepted tunnel connections send.
 	// Zero leaves it to the kernel, which is the default; it is set where the
@@ -456,7 +457,7 @@ func (s *WsTransport) tlsSettings() network.TLSSettings {
 // forwarder is this transport's forwarded ports for one generation.
 func (s *WsTransport) forwarder(g *wsGen) portForwarder {
 	return portForwarder{
-		ctx: g.ctx, ports: s.config.Ports, live: s.config.LivePorts, acceptUDP: s.config.AcceptUDP,
+		ctx: g.ctx, ports: s.config.Ports, live: s.config.LivePorts, reusePort: s.config.UserPortReuse, acceptUDP: s.config.AcceptUDP,
 		queue: g.localChannel, limits: s.limits, listeners: &s.listeners, log: s.logger,
 		tune:   s.tuneUserConn,
 		queued: requestAlways(g.reqNewConnChan, s.logger),

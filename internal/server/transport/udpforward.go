@@ -69,11 +69,13 @@ type udpForwarder struct {
 // unavailable datagram socket is a far worse outcome than the one forwarded
 // port not carrying UDP.
 func newUDPForwarder(logger *logrus.Logger, localAddr, remoteAddr string) (*udpForwarder, error) {
-	addr, err := net.ResolveUDPAddr("udp", localAddr)
-	if err != nil {
-		return nil, err
-	}
-	conn, err := net.ListenUDP("udp", addr)
+	return newUDPForwarderReuse(logger, localAddr, remoteAddr, false)
+}
+
+// newUDPForwarderReuse is newUDPForwarder, binding with SO_REUSEPORT when reuse
+// is set (config user_port_reuse).
+func newUDPForwarderReuse(logger *logrus.Logger, localAddr, remoteAddr string, reuse bool) (*udpForwarder, error) {
+	conn, err := listenUDP(localAddr, reuse)
 	if err != nil {
 		return nil, err
 	}
@@ -99,8 +101,15 @@ func newUDPForwarder(logger *logrus.Logger, localAddr, remoteAddr string) (*udpF
 // full channel silenced that peer until the service was restarted.
 func startUDPForward(ctx context.Context, logger *logrus.Logger, localAddr, remoteAddr string,
 	admit func(conn net.Conn, target string) bool) {
+	startUDPForwardReuse(ctx, logger, localAddr, remoteAddr, admit, false)
+}
 
-	fw, err := newUDPForwarder(logger, localAddr, remoteAddr)
+// startUDPForwardReuse is startUDPForward, binding with SO_REUSEPORT when reuse
+// is set.
+func startUDPForwardReuse(ctx context.Context, logger *logrus.Logger, localAddr, remoteAddr string,
+	admit func(conn net.Conn, target string) bool, reuse bool) {
+
+	fw, err := newUDPForwarderReuse(logger, localAddr, remoteAddr, reuse)
 	if err != nil {
 		logger.Warnf("forwarded port %s carries TCP only — its UDP side could not be opened: %v", localAddr, err)
 		return

@@ -321,6 +321,12 @@ type ServerConfig struct {
 	// "8080=127.0.0.1:80", "443-450" or "10.0.0.5:443". See docs/port-mappings.md
 	// for every form.
 	Ports []string `toml:"ports"`
+	// UserPortReuse lets a second HoneyWeb tunnel bind the same user ports at
+	// the same time (SO_REUSEPORT, TCP and UDP), so the tunnel manager can hand
+	// users over from an old tunnel to a new one without a moment in which
+	// nobody listens. Off by default: a port that another program or tunnel
+	// holds then fails to bind, exactly as before.
+	UserPortReuse bool `toml:"user_port_reuse"`
 	// PPROF exposes Go's profiling endpoint on 127.0.0.1:6060. Off by default and
 	// loopback-only: its heap dump contains this tunnel's token.
 	PPROF bool `toml:"pprof"`

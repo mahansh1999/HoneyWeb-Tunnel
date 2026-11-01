@@ -267,6 +267,7 @@ them both ends have to agree on. This says what exists.
 | `tls_key` | `string` | TLSKeyFile is the private key for tls_cert. |
 | `token` | `string` | Token is the shared secret. Both ends must hold exactly the same one, and a mismatch is refused without saying so — a peer without the token learns nothing, not even that something is listening. |
 | `transport` | `TransportType` | Transport is the carrier this tunnel uses. Both ends must name the same one; see docs/transports.md for what each is for. |
+| `user_port_reuse` | `bool` | UserPortReuse lets a second HoneyWeb tunnel bind the same user ports at the same time (SO_REUSEPORT, TCP and UDP), so the tunnel manager can hand users over from an old tunnel to a new one without a moment in which nobody listens. Off by default: a port that another program or tunnel holds then fails to bind, exactly as before. |
 | `web_bind` | `string` | WebBind is the address the sniffer/monitor page listens on. It has no authentication of any kind and reports the host's CPU, memory, disk and network along with the tunnel's status and per-port traffic, so it defaults to 127.0.0.1 and is reached over an SSH tunnel: ssh -L 2060:127.0.0.1:2060 root@server Set it to 0.0.0.0 to serve it on every interface as it used to be, or to one address to serve it on a private network only. |
 | `web_port` | `int` | WebPort is the port the per-tunnel monitor page listens on. 0 turns it off. |
 | `xray` | `XrayServerConfig` | Xray optionally wraps the loopback reverse TCP listener in XHTTP/TLS or RAW/REALITY using a tunnel-owned official helper. |
@@ -295,4 +296,4 @@ them both ends have to agree on. This says what exists.
 
 ---
 
-*Generated from `config/` on 2026-10-09. Last verified against Backpack v1.9.0.*
+*Generated from `config/` on 2026-11-01. Last verified against Backpack v1.9.0.*

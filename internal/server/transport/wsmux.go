@@ -64,6 +64,7 @@ type WsMuxConfig struct {
 	ACMECacheDir     string
 	Ports            []string
 	LivePorts        *live.Ports // optional: mappings changed without a restart (internal/live)
+	UserPortReuse    bool        // bind user ports with SO_REUSEPORT (config user_port_reuse)
 	AcceptUDP        bool
 	Nodelay          bool
 	Sniffer          bool
@@ -412,7 +413,7 @@ func (s *WsMuxTransport) session(g *wsMuxGen) muxSession {
 // forwarder is this transport's forwarded ports for one generation.
 func (s *WsMuxTransport) forwarder(g *wsMuxGen) portForwarder {
 	return portForwarder{
-		ctx: g.ctx, ports: s.config.Ports, live: s.config.LivePorts, acceptUDP: s.config.AcceptUDP,
+		ctx: g.ctx, ports: s.config.Ports, live: s.config.LivePorts, reusePort: s.config.UserPortReuse, acceptUDP: s.config.AcceptUDP,
 		queue: g.localChannel, limits: s.limits, listeners: &s.listeners, log: s.logger,
 		tune:   s.tuneUserConn,
 		queued: muxRequestForGeneration(g.ctx, &s.counterMutex, &s.streamCounter, &s.sessionCounter, s.config.MuxCon, g.reqNewConnChan, s.logger),

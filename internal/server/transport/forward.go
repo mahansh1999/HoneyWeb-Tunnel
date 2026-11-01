@@ -47,6 +47,10 @@ type portForwarder struct {
 	// (internal/live): the forwarder starts from live.Get() instead of ports
 	// and follows every later Set. Optional; nil keeps the fixed mappings.
 	live *live.Ports
+
+	// reusePort binds the user ports with SO_REUSEPORT (config user_port_reuse),
+	// so another tunnel taking over the same ports can bind them first.
+	reusePort bool
 }
 
 // run binds every mapping and returns; the listeners live until ctx ends.
@@ -177,7 +181,7 @@ func (f portForwarder) listen(ctx context.Context, localAddr string, target func
 	f.listeners.hold()
 	defer f.listeners.release()
 
-	listener, err := net.Listen("tcp", localAddr)
+	listener, err := listenTCP(localAddr, f.reusePort)
 	if err != nil {
 		// Not fatal: one port being taken must not stop the others.
 		f.log.Error(bindFailure("forwarded port", localAddr, err))
@@ -194,7 +198,7 @@ func (f portForwarder) listen(ctx context.Context, localAddr string, target func
 	// takes the target current at its start (marked as UDP, as newUDPForwarder
 	// does for the fixed target); flows already running keep theirs.
 	if f.acceptUDP {
-		go startUDPForward(ctx, f.log, localAddr, target(), func(c net.Conn, _ string) bool { return f.admitUDP(c, network.MarkUDP(target())) })
+		go startUDPForwardReuse(ctx, f.log, localAddr, target(), func(c net.Conn, _ string) bool { return f.admitUDP(c, network.MarkUDP(target())) }, f.reusePort)
 	}
 
 	<-ctx.Done()
