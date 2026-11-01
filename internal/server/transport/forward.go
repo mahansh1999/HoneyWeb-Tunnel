@@ -114,7 +114,7 @@ func (s *liveForwards) reconcile(ports []string) {
 			l = &liveListener{stop: stop}
 			l.target.Store(&target)
 			s.active[addr] = l
-			go s.f.listen(ctx, addr, func() string { return *l.target.Load() })
+			go s.listenRetry(ctx, addr, l)
 			s.f.log.Infof("live: now listening on %s -> %s (no restart)", addr, target)
 			continue
 		}
@@ -172,11 +172,40 @@ func eachForward(ports []string, log *logrus.Logger, bind func(localAddr, target
 	}
 }
 
+// listenRetry binds one live mapping. A port that another tunnel is about to
+// release (a handover) may still be held for a moment, so a failed bind is
+// retried every 500 ms for 10 s; if it never binds, the mapping leaves the
+// active set, so the next change of the mappings tries it again instead of
+// believing it is served.
+func (s *liveForwards) listenRetry(ctx context.Context, addr string, l *liveListener) {
+	target := func() string { return *l.target.Load() }
+	for attempt := 0; attempt < 20; attempt++ {
+		if s.f.listen(ctx, addr, target) || ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	s.mu.Lock()
+	if s.active[addr] == l {
+		delete(s.active, addr)
+		l.stop()
+	}
+	s.mu.Unlock()
+	s.f.log.Errorf("live: %s could not be bound for 10 s; it is not served (a later change of the mappings retries it)", addr)
+}
+
 // listen serves one forwarded port until ctx ends: the generation's context,
 // or for a live mapping a child of it that ends when the mapping is removed.
 // target is read for every new connection, so a live mapping can be pointed
 // elsewhere without rebinding.
-func (f portForwarder) listen(ctx context.Context, localAddr string, target func() string) {
+//
+// It reports false when the port could not be bound (and returns at once), true
+// once it has served the port until ctx ended.
+func (f portForwarder) listen(ctx context.Context, localAddr string, target func() string) bool {
 	// Counted so a restart can wait for the port to be free again.
 	f.listeners.hold()
 	defer f.listeners.release()
@@ -185,7 +214,7 @@ func (f portForwarder) listen(ctx context.Context, localAddr string, target func
 	if err != nil {
 		// Not fatal: one port being taken must not stop the others.
 		f.log.Error(bindFailure("forwarded port", localAddr, err))
-		return
+		return false
 	}
 	defer listener.Close()
 
@@ -202,6 +231,7 @@ func (f portForwarder) listen(ctx context.Context, localAddr string, target func
 	}
 
 	<-ctx.Done()
+	return true
 }
 
 // accept admits the users of one forwarded port into the queue.

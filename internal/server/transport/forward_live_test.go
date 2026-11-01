@@ -192,6 +192,36 @@ func TestUserPortHandover(t *testing.T) {
 	}
 }
 
+// TestLiveBindWaitsForAReleasingPort: a handover without SO_REUSEPORT removes
+// the port from the old tunnel and adds it to the new one; the old listener may
+// still hold it for a moment. The new tunnel must keep trying and take the port
+// as soon as it is free, without another change of the mappings.
+func TestLiveBindWaitsForAReleasingPort(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	log := logrus.New()
+	log.SetLevel(logrus.FatalLevel)
+	addr := "127.0.0.1:" + freePort(t)
+	holder, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ports := live.NewPorts(nil)
+	var listeners listenerSet
+	q := make(chan LocalTCPConn, 8)
+	portForwarder{ctx: ctx, queue: q, limits: newLimiter(Limits{}), listeners: &listeners, log: log, live: ports}.run()
+	ports.Set([]string{addr + "=7"})
+	time.Sleep(1200 * time.Millisecond) // still held: the forwarder is retrying
+	holder.Close()
+	u := dialUntil(t, addr)
+	defer u.Close()
+	if c := admitted(t, q); c.remoteAddr != "7" {
+		t.Fatalf("target %q, want 7", c.remoteAddr)
+	}
+	cancel()
+	listeners.wait(context.Background())
+}
+
 // TestFixedForwarderUnchanged checks that without a live holder the forwarder
 // binds its mappings exactly as it always did.
 func TestFixedForwarderUnchanged(t *testing.T) {
