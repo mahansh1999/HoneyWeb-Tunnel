@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/backpack/backpack/internal/peer"
 	"os"
 	"os/signal"
 	"syscall"
@@ -44,6 +45,10 @@ func main() {
 	// Handled before the flags, because it is a subcommand with flags of its
 	// own: `backpack node setup --panel ... --key ...`. The flag package would
 	// stop at "node" and report the rest as unknown.
+	// HoneyWeb Tunnel: the two-sided management agent (internal/peer).
+	if len(os.Args) > 1 && os.Args[1] == "peer" {
+		os.Exit(peer.Main(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "node" {
 		runNode(os.Args[2:])
 		return
