@@ -13,6 +13,12 @@
 #   manage.sh restart NAME                      restart only this tunnel's service
 #   manage.sh backups NAME | restore NAME TXID  configs saved before every change
 #   manage.sh remove NAME --confirm NAME        this server's side only; the other side is reported, not touched
+#   manage.sh version NAME                      config version (hash of its content), engine, tunnel id
+#   Two-sided (after `peer-setup` on both servers; the agent goes through the tunnel itself, loopback only):
+#   manage.sh peer-setup NAME                   install the management agent here (Iran: also its hidden mapping)
+#   manage.sh peer NAME CMD ARGS...             run a manage.sh command on the OTHER server of this tunnel
+#   manage.sh status-both NAME                  both sides: service, sessions, config version, same tunnel id?
+#   manage.sh remove-both NAME --confirm NAME   the other side first (scheduled, it cuts the channel), then here
 #   Add --yes to skip the confirmation (the impact is still printed).
 #
 # Every change is one transaction: lock -> backup (TXID) -> new file checked by `hwtunnel check` -> impact (active
@@ -106,6 +112,20 @@ apply() { local n=$1 new=$2 mode=$3 what=$4 lv=${5:-} before u since how
   if HWT_MANAGE_FAIL_HEALTH=0 healthy "$n" "$before"; then logtx "$n" "$OP" rolled-back; die "change rolled back; the tunnel runs the previous config again"
   else logtx "$n" "$OP" rollback-unhealthy; die "rolled back, but the tunnel is still unhealthy: journalctl -u hwtunnel-$n"; fi; }
 
+# ---- two-sided management (internal/peer; docs/manage/manage-tunnel.md) ----------------------------------------
+AGENT=127.0.0.1:59111
+peerport() { sed -n 's/^port=//p' "$ETC/$1.peer" 2>/dev/null | head -1; }
+is_mgmt() { [[ "$1" =~ ^127\.0\.0\.1:59[2-9][0-9][0-9]=127\.0\.0\.1:59111$ ]]; }
+cfgver() { grep -vE '^[[:space:]]*(#|$)' "$(cfg "$1")" | sha256sum | cut -c1-12; }
+# ssh_guard NAME: refuse when the SSH session running this command comes in through this tunnel itself
+ssh_guard() { local n=$1 lp m; [ -n "${SSH_CONNECTION:-}" ] || return 0; [ "${HWT_SSH_OK:-0}" = 1 ] && return 0
+  lp=$(echo "$SSH_CONNECTION" | awk '{print $4}')
+  if [ "$(role "$n")" = server ]; then
+    for m in $(plist "$n"); do [ "$(lport "$m")" = "$lp" ] && die "your SSH session comes in through port $lp of tunnel $n; changing or removing it would cut you off. Use another path (or HWT_SSH_OK=1 if you have one)"; done
+  else
+    case "$(echo "$SSH_CONNECTION" | awk '{print $1}')" in 127.0.0.1|::1) die "your SSH session comes from loopback, probably through a tunnel to this server; make sure it is not tunnel $n (HWT_SSH_OK=1 to go on)";; esac
+  fi; return 0; }
+
 # ---- views ------------------------------------------------------------------------------------------------------
 cmd_list() { local n any=0
   printf '%-14s %-12s %-7s %-8s %-7s %-22s %-6s %-9s %s\n' NAME ID ROLE TRANSP PROFILE PORTS POOL SESSIONS SERVICE
@@ -132,6 +152,8 @@ cmd_ports() { local n=$1 sub=${2:-list} arg=${3:-} cur new m p seen="" caps=0 lo
   exists "$n"; [ "$(role "$n")" = server ] || die "port mappings live on the Iran (server) side only; run this there"
   [ "$sub" = list ] && { for m in $(plist "$n"); do p=$(lport "$m"); echo "  $m   listening=$(ss -Htlnp "( sport = :$p )" | grep -q hwtunnel && echo yes || echo NO) users=$(ss -Htn state established "( sport = :$p )" | wc -l)"; done; return; }
   cur=$(plist "$n" | paste -sd,)
+  local mg; mg=$(plist "$n" | while read -r m; do if is_mgmt "$m"; then echo "$m"; fi; done | paste -sd,)
+  ssh_guard "$n"
   case "$sub" in
     add) validmap "$arg" || die "bad mapping '$arg'"; new="$cur,$arg";;
     del) [[ "$arg" =~ ^[0-9]+$ ]] || die "del takes the listening port"; new=$(plist "$n" | while read -r m; do [ "$(lport "$m")" = "$arg" ] || echo "$m"; done | paste -sd,)
@@ -139,6 +161,12 @@ cmd_ports() { local n=$1 sub=${2:-list} arg=${3:-} cur new m p seen="" caps=0 lo
     set) new=$arg;;
     *) die "ports NAME list|add MAP|del PORT|set MAP[,MAP...]";;
   esac
+  new=${new#,}
+  # the hidden management mapping stays, whatever the user edits (set, del)
+  if [ -n "$mg" ] && [[ ",$new," != *",$mg,"* ]]; then
+    [ "$sub" = del ] && [ "$(lport "$mg")" = "$arg" ] && die "port $arg is the management mapping (manage.sh peer-setup); it is not a user port"
+    new="$new,$mg"
+  fi
   new=${new#,}; [ -n "$new" ] || die "a server tunnel needs at least one mapping"
   for m in ${new//,/ }; do validmap "$m" || die "bad mapping '$m'"; p=$(lport "$m")
     [ "$p" -ge 1 ] && [ "$p" -le 65535 ] || die "bad port $p"
@@ -185,8 +213,17 @@ cmd_restore() { local n=$1 t=${2:-} f; exists "$n"; [ -f "$BK/$n.$t.toml" ] || d
   NAME=$n; OP="restore:$t"; begin "$n"; f="$(cfg "$n").new-$TX"; cp -p "$BK/$n.$t.toml" "$f"
   local mode=reload; cmp -s "$BK/$n.$t.service" "/etc/systemd/system/hwtunnel-$n.service" || { cp -p "$BK/$n.$t.service" "/etc/systemd/system/hwtunnel-$n.service"; mode=restart; }
   apply "$n" "$f" "$mode" "restore the config saved in tx $t"; }
-cmd_remove() { local n=$1 conf=${2:-} name=${3:-} d
+cmd_remove() { local n=$1 conf=${2:-} name=${3:-} dflag=${4:-} delay=${5:-} d
   exists "$n"; [ "$conf" = --confirm ] && [ "$name" = "$n" ] || die "type the name to confirm: manage.sh remove $n --confirm $n"
+  ssh_guard "$n"
+  if [ "$dflag" = --delay ]; then
+    [[ "$delay" =~ ^[0-9]{1,3}$ ]] || die "--delay takes seconds"
+    [ -f "$ROOT/bin/manage.sh" ] || die "$ROOT/bin/manage.sh is missing (manage.sh peer-setup installs it)"
+    systemd-run --quiet --on-active="${delay}s" --unit="hwt-remove-$n-$$" --collect /bin/bash "$ROOT/bin/manage.sh" remove "$n" --confirm "$n" --yes \
+      || die "could not schedule the removal"
+    TX=$(date -u +%Y%m%dT%H%M%SZ)-$$; logtx "$n" remove "scheduled:${delay}s"
+    say "removal of $n scheduled in ${delay} s (unit hwt-remove-$n-$$): its $(sessions "$n") sessions end then"; return 0
+  fi
   NAME=$n; OP=remove; begin "$n"
   confirm "remove tunnel $n (id $(tid "$n")) from THIS server: $(sessions "$n") sessions and $(users "$n") user connections end now. Its other side keeps running until removed there (manage.sh remove $n there). Binary, other tunnels and other services stay"
   systemctl disable --now "hwtunnel-$n" >/dev/null 2>&1 || true
@@ -196,6 +233,65 @@ cmd_remove() { local n=$1 conf=${2:-} name=${3:-} d
   mv "/etc/systemd/system/hwtunnel-$n.service" "$d/" 2>/dev/null || true; mv "/etc/systemd/system/hwtunnel-$n-firewall.service" "$d/" 2>/dev/null || true
   systemctl daemon-reload; logtx "$n" remove ok
   say "removed from this server; files kept in $d. Other side: still installed (remove it there; it reconnects in vain until then)"; }
+
+cmd_version() { exists "$1"; echo "name=$1 id=$(tid "$1") role=$(role "$1") config=$(cfgver "$1") engine=$("$BIN" -v 2>&1 | head -1) binary=$(readlink "$BIN") service=$(systemctl is-active "hwtunnel-$1") sessions=$(sessions "$1")"; }
+cmd_peer_setup() { local n=$1 p used self; exists "$n"
+  self=$(readlink -f "$0" 2>/dev/null || true)
+  if [ -f "$self" ] && [ "$self" != "$ROOT/bin/manage.sh" ]; then install -m 0750 "$self" "$ROOT/bin/manage.sh"; fi
+  [ -f "$ROOT/bin/manage.sh" ] || die "run peer-setup from a manage.sh file (it installs itself to $ROOT/bin/manage.sh)"
+  local probe; probe=$("$BIN" peer 2>&1 || true)
+  [[ "$probe" == *"serve|run|queue"* ]] || die "this engine has no management agent (it needs the HoneyWeb engine with internal/peer)"
+  cat > /etc/systemd/system/hwtunnel-peer.service <<EOF
+[Unit]
+Description=HoneyWeb Tunnel management agent (loopback only; reached through the tunnels)
+After=network-online.target
+
+[Service]
+ExecStart=$BIN peer serve --listen $AGENT --etc $ETC --manage $ROOT/bin/manage.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  if [ "$(role "$n")" = server ] && [ -z "$(peerport "$n")" ]; then
+    used=$(cat "$ETC"/*.peer 2>/dev/null | sed -n 's/^port=//p' || true)
+    for p in $(seq 59201 59299); do echo "$used" | grep -qx "$p" && continue; ss -Htln "( sport = :$p )" | grep -q . && continue; break; done
+    (YES=1; cmd_ports "$n" add "127.0.0.1:$p=127.0.0.1:59111") || die "could not add the management mapping"
+    printf 'port=%s\n' "$p" > "$ETC/$n.peer"; chmod 0600 "$ETC/$n.peer"
+  fi
+  systemctl daemon-reload; systemctl enable hwtunnel-peer >/dev/null 2>&1; systemctl restart hwtunnel-peer
+  sleep 1; systemctl is-active --quiet hwtunnel-peer || die "the agent did not start: journalctl -u hwtunnel-peer"
+  say "management agent on $AGENT$([ -n "$(peerport "$n")" ] && echo "; tunnel $n reaches the other side's agent through 127.0.0.1:$(peerport "$n")")"; }
+cmd_peer() { local n=$1; shift; exists "$n"; [ $# -gt 0 ] || die "peer NAME CMD ARGS..."
+  systemctl is-active --quiet hwtunnel-peer || die "no management agent here (manage.sh peer-setup $n)"
+  local rc=0
+  if [ "$(role "$n")" = server ]; then
+    local p; p=$(peerport "$n"); [ -n "$p" ] || die "tunnel $n has no management mapping (manage.sh peer-setup $n)"
+    "$BIN" peer run --tunnel "$n" --to "127.0.0.1:$p" --etc "$ETC" "$@" || rc=$?
+  else "$BIN" peer queue --tunnel "$n" --etc "$ETC" "$@" || rc=$?; fi
+  if [ $rc = 1 ] && [[ " $* " =~ " "(pool|profile|restart|restore|remove)" " ]]; then
+    # a change that restarts this tunnel cuts the channel its own answer travels on
+    echo "manage.sh: the answer did not come back. '$1' may have restarted tunnel $n and with it this management channel, so the change may well be applied: check with 'manage.sh status-both $n' in a few seconds" >&2
+  fi
+  return $rc; }
+cmd_status_both() { local n=$1 here there; exists "$n"; here=$(cmd_version "$n")
+  echo "this server:  $here"
+  if there=$(cmd_peer "$n" version "$n" 2>&1); then
+    echo "other server: $there"
+    if [ "$(echo "$there" | grep -o 'id=[0-9a-f]*' | head -1)" = "id=$(tid "$n")" ]; then echo "==> same tunnel on both sides (id $(tid "$n"))"
+    else echo "!! the other side reports a different tunnel id"; return 1; fi
+  else echo "other server: unreachable through the tunnel ($there)"; echo "!! status of the other side unknown"; return 1; fi; }
+cmd_remove_both() { local n=$1 conf=${2:-} name=${3:-} out
+  exists "$n"; [ "$conf" = --confirm ] && [ "$name" = "$n" ] || die "type the name to confirm: manage.sh remove-both $n --confirm $n"
+  ssh_guard "$n"
+  NAME=$n; OP=remove-both
+  confirm "remove tunnel $n (id $(tid "$n")) from BOTH servers: $(sessions "$n") sessions and $(users "$n") user connections end. The other side is removed first, 8 s after it confirms (that cuts this management channel), then this side"
+  out=$(cmd_peer "$n" remove "$n" --confirm "$n" --delay 8 2>&1) || { echo "$out"; die "the other side did not schedule its removal: NOTHING was removed (tunnel $n is untouched on both sides)"; }
+  echo "other side: $out"
+  echo "$out" | grep -q "scheduled" || die "the other side did not confirm the schedule: NOTHING was removed here; check the other side"
+  (YES=1; cmd_remove "$n" --confirm "$n")
+  say "remove-both $n: removed here; the other side confirmed its removal 8 s after its answer (it cannot report back through this tunnel any more: verify there with manage.sh list)"; }
 
 menu() { local ch n
   while :; do echo; echo "$(c '1;33' 'HoneyWeb Tunnel Manager')"; cmd_list; echo
@@ -224,7 +320,12 @@ case "${1:-menu}" in
   restart) cmd_restart "${2:?NAME}";;
   backups) cmd_backups "${2:?NAME}";;
   restore) cmd_restore "${2:?NAME}" "${3:-}";;
-  remove) cmd_remove "${2:?NAME}" "${3:-}" "${4:-}";;
+  remove) cmd_remove "${2:?NAME}" "${3:-}" "${4:-}" "${5:-}" "${6:-}";;
+  version) cmd_version "${2:?NAME}";;
+  peer-setup) cmd_peer_setup "${2:?NAME}";;
+  peer) n=${2:?NAME}; shift 2; cmd_peer "$n" "$@";;
+  status-both) cmd_status_both "${2:?NAME}";;
+  remove-both) cmd_remove_both "${2:?NAME}" "${3:-}" "${4:-}";;
   -h|--help|help) sed -n '2,24p' "$0";;
   *) die "unknown command '$1' (manage.sh help)";;
 esac
