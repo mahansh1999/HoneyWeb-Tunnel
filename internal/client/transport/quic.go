@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/backpack/backpack/internal/controlwire"
+	"github.com/backpack/backpack/internal/live"
 	"github.com/backpack/backpack/internal/metrics"
 	"github.com/backpack/backpack/internal/utils"
 	"github.com/backpack/backpack/internal/utils/network"
@@ -49,6 +50,7 @@ type QuicConfig struct {
 	RetryInterval  time.Duration
 	DialTimeOut    time.Duration
 	ConnPoolSize   int
+	LivePool       *live.Pool // optional: raised without a restart (internal/live)
 	WebPort        int
 	AggressivePool bool
 	SO_RCVBUF      int
@@ -260,7 +262,7 @@ func (c *QuicTransport) poolMaintainer() {
 		mux:        true,
 		ctx:        c.state.Ctx(),
 		log:        c.logger,
-		size:       c.config.ConnPoolSize,
+		size:       c.config.LivePool.Get(c.config.ConnPoolSize),
 		aggressive: c.config.AggressivePool,
 		open:       &c.poolConnections,
 		taken:      &c.loadConnections,
@@ -268,7 +270,8 @@ func (c *QuicTransport) poolMaintainer() {
 		dial:       c.tunnelDialer,
 		spawn:      c.state.Go,
 		pending:    &c.dialingConnections,
-		maxSize:    c.config.ConnPoolSize * poolGrowthLimit,
+		maxSize:    c.config.LivePool.Get(c.config.ConnPoolSize) * poolGrowthLimit,
+		live:       c.config.LivePool,
 	}.maintain()
 }
 
@@ -280,7 +283,7 @@ func (c *QuicTransport) control() controlLoop {
 // tunnelDialer opens one data stream, announces it, and then waits for the
 // server to name the backend it should carry.
 func (c *QuicTransport) tunnelDialer() {
-	ready, ok := c.beginPoolDial(c.config.ConnPoolSize * poolGrowthLimit)
+	ready, ok := c.beginPoolDial(c.config.LivePool.Get(c.config.ConnPoolSize) * poolGrowthLimit)
 	if !ok {
 		return
 	}

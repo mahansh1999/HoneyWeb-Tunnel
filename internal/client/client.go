@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/backpack/backpack/internal/live"
 	"github.com/backpack/backpack/internal/utils"
 
 	"github.com/backpack/backpack/config"
@@ -25,6 +26,9 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	logger *logrus.Logger
+	// livePool lets cmd raise the connection pool of the running tunnel
+	// without restarting it (internal/live), across every transport it starts.
+	livePool *live.Pool
 }
 
 func NewClient(cfg *config.ClientConfig, parentCtx context.Context) *Client {
@@ -36,12 +40,17 @@ func NewClient(cfg *config.ClientConfig, parentCtx context.Context) *Client {
 	// Loopback unless this tunnel asked otherwise; see web/monitorhttp.go.
 	web.SetMonitorBind(cfg.WebBind)
 	return &Client{
-		config: cfg,
-		ctx:    ctx,
-		cancel: cancel,
-		logger: utils.NewLoggerWithFormat(cfg.LogLevel, cfg.LogFormat),
+		config:   cfg,
+		ctx:      ctx,
+		cancel:   cancel,
+		logger:   utils.NewLoggerWithFormat(cfg.LogLevel, cfg.LogFormat),
+		livePool: live.NewPool(cfg.ConnectionPool),
 	}
 }
+
+// LivePool is the holder through which the running tunnel's connection pool
+// grows without a restart. Every client transport reads it.
+func (c *Client) LivePool() *live.Pool { return c.livePool }
 
 // Start starts the client and begins dialing the tunnel server.
 func (c *Client) Start() {
@@ -199,6 +208,7 @@ func (c *Client) startTransport(ctx context.Context, tr config.TransportType, en
 			RetryInterval:  time.Duration(c.config.RetryInterval) * time.Second,
 			DialTimeOut:    time.Duration(c.config.DialTimeout) * time.Second,
 			ConnPoolSize:   c.config.ConnectionPool,
+			LivePool:       c.livePool,
 			Token:          c.config.Token,
 			Sniffer:        c.config.Sniffer,
 			WebPort:        c.config.WebPort,
@@ -226,6 +236,7 @@ func (c *Client) startTransport(ctx context.Context, tr config.TransportType, en
 			RetryInterval:    time.Duration(c.config.RetryInterval) * time.Second,
 			DialTimeOut:      time.Duration(c.config.DialTimeout) * time.Second,
 			ConnPoolSize:     c.config.ConnectionPool,
+			LivePool:         c.livePool,
 			Token:            c.config.Token,
 			MuxVersion:       c.config.MuxVersion,
 			MaxFrameSize:     c.config.MaxFrameSize,
@@ -254,6 +265,7 @@ func (c *Client) startTransport(ctx context.Context, tr config.TransportType, en
 			RetryInterval:    time.Duration(c.config.RetryInterval) * time.Second,
 			DialTimeOut:      time.Duration(c.config.DialTimeout) * time.Second,
 			ConnPoolSize:     c.config.ConnectionPool,
+			LivePool:         c.livePool,
 			Token:            c.config.Token,
 			MuxVersion:       c.config.MuxVersion,
 			MaxFrameSize:     c.config.MaxFrameSize,
@@ -293,6 +305,7 @@ func (c *Client) startTransport(ctx context.Context, tr config.TransportType, en
 			RetryInterval:  time.Duration(c.config.RetryInterval) * time.Second,
 			DialTimeOut:    time.Duration(c.config.DialTimeout) * time.Second,
 			ConnPoolSize:   c.config.ConnectionPool,
+			LivePool:       c.livePool,
 			Token:          c.config.Token,
 			Sniffer:        c.config.Sniffer,
 			WebPort:        c.config.WebPort,
@@ -314,6 +327,7 @@ func (c *Client) startTransport(ctx context.Context, tr config.TransportType, en
 			RetryInterval:  time.Duration(c.config.RetryInterval) * time.Second,
 			DialTimeOut:    time.Duration(c.config.DialTimeout) * time.Second,
 			ConnPoolSize:   c.config.ConnectionPool,
+			LivePool:       c.livePool,
 			Token:          c.config.Token,
 			Sniffer:        c.config.Sniffer,
 			WebPort:        c.config.WebPort,
@@ -338,6 +352,7 @@ func (c *Client) startTransport(ctx context.Context, tr config.TransportType, en
 			RetryInterval:    time.Duration(c.config.RetryInterval) * time.Second,
 			DialTimeOut:      time.Duration(c.config.DialTimeout) * time.Second,
 			ConnPoolSize:     c.config.ConnectionPool,
+			LivePool:         c.livePool,
 			Token:            c.config.Token,
 			MuxVersion:       c.config.MuxVersion,
 			MaxFrameSize:     c.config.MaxFrameSize,
@@ -364,6 +379,7 @@ func (c *Client) startTransport(ctx context.Context, tr config.TransportType, en
 			RetryInterval:  time.Duration(c.config.RetryInterval) * time.Second,
 			DialTimeOut:    time.Duration(c.config.DialTimeout) * time.Second,
 			ConnPoolSize:   c.config.ConnectionPool,
+			LivePool:       c.livePool,
 			Token:          c.config.Token,
 			Sniffer:        c.config.Sniffer,
 			WebPort:        c.config.WebPort,

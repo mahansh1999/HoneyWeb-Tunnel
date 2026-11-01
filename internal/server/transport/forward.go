@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/backpack/backpack/internal/live"
+	"github.com/backpack/backpack/internal/utils/network"
 )
 
 // portForwarder is the user-facing half of a stream transport on the Iran
@@ -39,14 +42,91 @@ type portForwarder struct {
 	// waiting in queue: the transport asks its client for a tunnel connection
 	// or a stream to carry it. Optional.
 	queued func()
+
+	// live, when set, makes the mappings changeable while the generation runs
+	// (internal/live): the forwarder starts from live.Get() instead of ports
+	// and follows every later Set. Optional; nil keeps the fixed mappings.
+	live *live.Ports
 }
 
 // run binds every mapping and returns; the listeners live until ctx ends.
 func (f portForwarder) run() {
 	go drainOnEnd(f.ctx, f.queue, f.limits)
-	eachForward(f.ports, f.log, func(localAddr, target string) {
-		go f.listen(localAddr, target)
+	if f.live == nil {
+		eachForward(f.ports, f.log, func(localAddr, target string) {
+			go f.listen(f.ctx, localAddr, fixedTarget(target))
+		})
+		return
+	}
+	set := &liveForwards{f: f, active: map[string]*liveListener{}}
+	set.reconcile(f.live.Get())
+	unsubscribe := f.live.Subscribe(set.reconcile)
+	context.AfterFunc(f.ctx, unsubscribe)
+}
+
+// fixedTarget is the target of a mapping that cannot change.
+func fixedTarget(t string) func() string { return func() string { return t } }
+
+// liveListener is one bound address of a live forwarder.
+type liveListener struct {
+	stop   context.CancelFunc
+	target atomic.Pointer[string]
+}
+
+// liveForwards keeps a generation's listeners equal to the live mappings.
+type liveForwards struct {
+	f      portForwarder
+	mu     sync.Mutex
+	active map[string]*liveListener
+}
+
+// reconcile moves the listeners to ports without touching a connection that is
+// already admitted: those belong to the generation (limits.wrap(f.ctx, ...)),
+// not to the listener that accepted them, so a closed listener only stops new
+// users while the ones it let in finish their sessions (graceful draining).
+//
+// Order matters for a port that moves: new addresses are bound first, then
+// targets are swapped, and listeners that are no longer wanted close last, so
+// there is no moment in which neither the old nor the new port accepts.
+func (s *liveForwards) reconcile(ports []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.f.ctx.Err() != nil {
+		return
+	}
+	want := map[string]string{}
+	var order []string
+	eachForward(ports, s.f.log, func(localAddr, target string) {
+		if _, dup := want[localAddr]; !dup {
+			order = append(order, localAddr)
+		}
+		want[localAddr] = target
 	})
+	for _, addr := range order {
+		target := want[addr]
+		l, ok := s.active[addr]
+		if !ok {
+			ctx, stop := context.WithCancel(s.f.ctx)
+			l = &liveListener{stop: stop}
+			l.target.Store(&target)
+			s.active[addr] = l
+			go s.f.listen(ctx, addr, func() string { return *l.target.Load() })
+			s.f.log.Infof("live: now listening on %s -> %s (no restart)", addr, target)
+			continue
+		}
+		if old := *l.target.Load(); old != target {
+			l.target.Store(&target)
+			s.f.log.Infof("live: %s now forwards new connections to %s (was %s); open connections keep theirs", addr, target, old)
+		}
+	}
+	for addr, l := range s.active {
+		if _, keep := want[addr]; keep {
+			continue
+		}
+		l.stop()
+		delete(s.active, addr)
+		s.f.log.Infof("live: stopped listening on %s; its open connections continue until they end", addr)
+	}
 }
 
 // eachForward expands the port mappings and calls bind for every port they
@@ -88,8 +168,11 @@ func eachForward(ports []string, log *logrus.Logger, bind func(localAddr, target
 	}
 }
 
-// listen serves one forwarded port until the generation ends.
-func (f portForwarder) listen(localAddr, remoteAddr string) {
+// listen serves one forwarded port until ctx ends: the generation's context,
+// or for a live mapping a child of it that ends when the mapping is removed.
+// target is read for every new connection, so a live mapping can be pointed
+// elsewhere without rebinding.
+func (f portForwarder) listen(ctx context.Context, localAddr string, target func() string) {
 	// Counted so a restart can wait for the port to be free again.
 	f.listeners.hold()
 	defer f.listeners.release()
@@ -104,23 +187,25 @@ func (f portForwarder) listen(localAddr, remoteAddr string) {
 
 	f.log.Infof("listener started successfully, listening on address: %s", listener.Addr().String())
 
-	go f.accept(listener, remoteAddr)
+	go f.accept(ctx, listener, target)
 
 	// The same port number, over UDP, when the tunnel forwards UDP. Its flows
-	// travel through the tunnel exactly like TCP connections do.
+	// travel through the tunnel exactly like TCP connections do. A new flow
+	// takes the target current at its start (marked as UDP, as newUDPForwarder
+	// does for the fixed target); flows already running keep theirs.
 	if f.acceptUDP {
-		go startUDPForward(f.ctx, f.log, localAddr, remoteAddr, f.admitUDP)
+		go startUDPForward(ctx, f.log, localAddr, target(), func(c net.Conn, _ string) bool { return f.admitUDP(c, network.MarkUDP(target())) })
 	}
 
-	<-f.ctx.Done()
+	<-ctx.Done()
 }
 
 // accept admits the users of one forwarded port into the queue.
-func (f portForwarder) accept(listener net.Listener, remoteAddr string) {
+func (f portForwarder) accept(ctx context.Context, listener net.Listener, target func() string) {
 	var backoff acceptBackoff
 	for {
 		select {
-		case <-f.ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 		}
@@ -129,7 +214,7 @@ func (f portForwarder) accept(listener net.Listener, remoteAddr string) {
 			f.log.Debugf("failed to accept connection on %s: %v", listener.Addr(), err)
 			// A closed listener ends the loop; anything else is retried with
 			// a pause, so a persistent error does not spin a core.
-			if !backoff.Fail(f.ctx) {
+			if !backoff.Fail(ctx) {
 				return
 			}
 			continue
@@ -156,7 +241,7 @@ func (f portForwarder) accept(listener net.Listener, remoteAddr string) {
 		wrapped := f.limits.wrap(f.ctx, conn)
 
 		select {
-		case f.queue <- LocalTCPConn{conn: wrapped, remoteAddr: remoteAddr, timeCreated: time.Now().UnixMilli()}:
+		case f.queue <- LocalTCPConn{conn: wrapped, remoteAddr: target(), timeCreated: time.Now().UnixMilli()}:
 			f.log.Debugf("forwarded port: accepted a client from %s", tcpConn.RemoteAddr().String())
 			if f.queued != nil {
 				f.queued()

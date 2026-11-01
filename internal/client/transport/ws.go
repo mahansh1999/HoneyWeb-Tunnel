@@ -9,6 +9,7 @@ import (
 
 	"github.com/backpack/backpack/config"
 	"github.com/backpack/backpack/internal/controlwire"
+	"github.com/backpack/backpack/internal/live"
 	"github.com/backpack/backpack/internal/utils"
 	"github.com/backpack/backpack/internal/utils/handlers"
 	"github.com/backpack/backpack/internal/utils/network"
@@ -38,6 +39,7 @@ type WsConfig struct {
 	RetryInterval  time.Duration
 	DialTimeOut    time.Duration
 	ConnPoolSize   int
+	LivePool       *live.Pool // optional: raised without a restart (internal/live)
 	WebPort        int
 	Mode           config.TransportType
 	SimpleAuth     bool
@@ -126,7 +128,7 @@ func (c *WsTransport) poolMaintainer() {
 	poolSizer{
 		ctx:        c.state.Ctx(),
 		log:        c.logger,
-		size:       c.config.ConnPoolSize,
+		size:       c.config.LivePool.Get(c.config.ConnPoolSize),
 		aggressive: c.config.AggressivePool,
 		open:       &c.poolConnections,
 		taken:      &c.loadConnections,
@@ -134,7 +136,8 @@ func (c *WsTransport) poolMaintainer() {
 		dial:       c.tunnelDialer,
 		spawn:      c.state.Go,
 		pending:    &c.dialingConnections,
-		maxSize:    c.config.ConnPoolSize * poolGrowthLimit,
+		maxSize:    c.config.LivePool.Get(c.config.ConnPoolSize) * poolGrowthLimit,
+		live:       c.config.LivePool,
 	}.maintain()
 }
 
@@ -147,7 +150,7 @@ func (c *WsTransport) control() controlLoop {
 }
 
 func (c *WsTransport) tunnelDialer() {
-	ready, ok := c.beginPoolDial(c.config.ConnPoolSize * poolGrowthLimit)
+	ready, ok := c.beginPoolDial(c.config.LivePool.Get(c.config.ConnPoolSize) * poolGrowthLimit)
 	if !ok {
 		return
 	}

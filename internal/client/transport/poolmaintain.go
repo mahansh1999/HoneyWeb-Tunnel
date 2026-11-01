@@ -7,6 +7,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/backpack/backpack/internal/live"
 	"github.com/backpack/backpack/internal/metrics"
 )
 
@@ -76,6 +77,12 @@ type poolSizer struct {
 	spawn   func(func())
 	pending *int32
 	maxSize int
+
+	// live, when set, is the pool size cmd may raise while the generation runs
+	// (internal/live); ceilFor gives the growth ceiling for a size (nil: size
+	// times poolGrowthLimit). Both optional: nil keeps the fixed size.
+	live    *live.Pool
+	ceilFor func(size int) int
 }
 
 func (p poolSizer) launch() {
@@ -124,6 +131,20 @@ func (p poolSizer) maintain() {
 			return
 
 		case <-tickerPool.C:
+			// A larger pool from a live reload: aim higher, close nothing. The
+			// refill below dials the missing sessions on this very tick.
+			if n := p.live.Get(p.size); n > p.size {
+				p.log.Infof("live: connection pool %d -> %d without a restart; open sessions are kept", p.size, n)
+				p.size = n
+				if newPoolSize < n {
+					newPoolSize = n
+				}
+				if p.ceilFor != nil {
+					ceiling = p.ceilFor(n)
+				} else {
+					ceiling = n * poolGrowthLimit
+				}
+			}
 			// Accumulate pool connections over time (every second)
 			atomic.AddInt32(&openSum, atomic.LoadInt32(p.open))
 			// A failed initial dial or a retired session must not permanently

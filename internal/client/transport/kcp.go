@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/backpack/backpack/internal/controlwire"
+	"github.com/backpack/backpack/internal/live"
 	"github.com/backpack/backpack/internal/metrics"
 	"github.com/backpack/backpack/internal/utils"
 	"github.com/backpack/backpack/internal/utils/network"
@@ -45,6 +46,7 @@ type KcpConfig struct {
 	MaxReceiveBuffer int
 	MaxStreamBuffer  int
 	ConnPoolSize     int
+	LivePool         *live.Pool // optional: raised without a restart (internal/live)
 	WebPort          int
 	AggressivePool   bool
 	SO_RCVBUF        int
@@ -294,7 +296,7 @@ func (c *KcpTransport) poolMaintainer() {
 		mux:        true,
 		ctx:        c.state.Ctx(),
 		log:        c.logger,
-		size:       c.config.ConnPoolSize,
+		size:       c.config.LivePool.Get(c.config.ConnPoolSize),
 		aggressive: c.config.AggressivePool,
 		open:       &c.poolConnections,
 		taken:      &c.loadConnections,
@@ -302,7 +304,9 @@ func (c *KcpTransport) poolMaintainer() {
 		dial:       c.tunnelDialer,
 		spawn:      c.state.Go,
 		pending:    &c.dialingConnections,
-		maxSize:    muxPoolLimit(c.config.ConnPoolSize, c.config.MaxReceiveBuffer),
+		maxSize:    muxPoolLimit(c.config.LivePool.Get(c.config.ConnPoolSize), c.config.MaxReceiveBuffer),
+		live:       c.config.LivePool,
+		ceilFor:    func(n int) int { return muxPoolLimit(n, c.config.MaxReceiveBuffer) },
 	}.maintain()
 }
 
@@ -312,7 +316,7 @@ func (c *KcpTransport) control() controlLoop {
 }
 
 func (c *KcpTransport) tunnelDialer() {
-	ready, ok := c.beginPoolDial(muxPoolLimit(c.config.ConnPoolSize, c.config.MaxReceiveBuffer))
+	ready, ok := c.beginPoolDial(muxPoolLimit(c.config.LivePool.Get(c.config.ConnPoolSize), c.config.MaxReceiveBuffer))
 	if !ok {
 		return
 	}

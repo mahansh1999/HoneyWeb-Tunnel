@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/backpack/backpack/internal/controlwire"
+	"github.com/backpack/backpack/internal/live"
 	"github.com/backpack/backpack/internal/metrics"
 	"github.com/backpack/backpack/internal/utils"
 	"github.com/backpack/backpack/internal/utils/handlers"
@@ -70,6 +71,7 @@ type QuicConfig struct {
 	SnifferLog    string
 	Token         string
 	Ports         []string
+	LivePorts     *live.Ports // optional: mappings changed without a restart (internal/live)
 	AcceptUDP     bool
 	Sniffer       bool
 	ChannelSize   int
@@ -562,7 +564,7 @@ func (s *QuicTransport) handleLoop(g *quicGen) {
 // forwarder is this transport's forwarded ports for one generation.
 func (s *QuicTransport) forwarder(g *quicGen) portForwarder {
 	return portForwarder{
-		ctx: g.ctx, ports: s.config.Ports, acceptUDP: s.config.AcceptUDP,
+		ctx: g.ctx, ports: s.config.Ports, live: s.config.LivePorts, acceptUDP: s.config.AcceptUDP,
 		queue: g.localChannel, limits: s.limits, listeners: &s.listeners, log: s.logger,
 		tune:   alwaysNodelay(s.logger),
 		queued: nil,

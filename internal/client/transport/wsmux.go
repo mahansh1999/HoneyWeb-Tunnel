@@ -8,6 +8,7 @@ import (
 
 	"github.com/backpack/backpack/config"
 	"github.com/backpack/backpack/internal/controlwire"
+	"github.com/backpack/backpack/internal/live"
 	"github.com/backpack/backpack/internal/metrics"
 	"github.com/backpack/backpack/internal/utils/network"
 	"github.com/xtaci/smux"
@@ -41,6 +42,7 @@ type WsMuxConfig struct {
 	MaxReceiveBuffer int
 	MaxStreamBuffer  int
 	ConnPoolSize     int
+	LivePool         *live.Pool // optional: raised without a restart (internal/live)
 	WebPort          int
 	Mode             config.TransportType
 	SimpleAuth       bool
@@ -138,7 +140,7 @@ func (c *WsMuxTransport) poolMaintainer() {
 		mux:        true,
 		ctx:        c.state.Ctx(),
 		log:        c.logger,
-		size:       c.config.ConnPoolSize,
+		size:       c.config.LivePool.Get(c.config.ConnPoolSize),
 		aggressive: c.config.AggressivePool,
 		open:       &c.poolConnections,
 		taken:      &c.loadConnections,
@@ -146,7 +148,9 @@ func (c *WsMuxTransport) poolMaintainer() {
 		dial:       c.tunnelDialer,
 		spawn:      c.state.Go,
 		pending:    &c.dialingConnections,
-		maxSize:    muxPoolLimit(c.config.ConnPoolSize, c.config.MaxReceiveBuffer),
+		maxSize:    muxPoolLimit(c.config.LivePool.Get(c.config.ConnPoolSize), c.config.MaxReceiveBuffer),
+		live:       c.config.LivePool,
+		ceilFor:    func(n int) int { return muxPoolLimit(n, c.config.MaxReceiveBuffer) },
 	}.maintain()
 }
 
@@ -159,7 +163,7 @@ func (c *WsMuxTransport) control() controlLoop {
 }
 
 func (c *WsMuxTransport) tunnelDialer() {
-	ready, ok := c.beginPoolDial(muxPoolLimit(c.config.ConnPoolSize, c.config.MaxReceiveBuffer))
+	ready, ok := c.beginPoolDial(muxPoolLimit(c.config.LivePool.Get(c.config.ConnPoolSize), c.config.MaxReceiveBuffer))
 	if !ok {
 		return
 	}

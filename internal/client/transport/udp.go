@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/backpack/backpack/internal/controlwire"
+	"github.com/backpack/backpack/internal/live"
 	"github.com/backpack/backpack/internal/metrics"
 	"github.com/backpack/backpack/internal/utils"
 	"github.com/backpack/backpack/internal/utils/network"
@@ -31,6 +32,7 @@ type UdpConfig struct {
 	RetryInterval  time.Duration
 	DialTimeOut    time.Duration
 	ConnPoolSize   int
+	LivePool       *live.Pool // optional: raised without a restart (internal/live)
 	WebPort        int
 	Sniffer        bool
 	AggressivePool bool
@@ -153,7 +155,7 @@ func (c *UdpTransport) poolMaintainer() {
 	poolSizer{
 		ctx:        c.state.Ctx(),
 		log:        c.logger,
-		size:       c.config.ConnPoolSize,
+		size:       c.config.LivePool.Get(c.config.ConnPoolSize),
 		aggressive: c.config.AggressivePool,
 		open:       &c.poolConnections,
 		taken:      &c.loadConnections,
@@ -161,7 +163,8 @@ func (c *UdpTransport) poolMaintainer() {
 		dial:       c.tunnelDialer,
 		spawn:      c.state.Go,
 		pending:    &c.dialingConnections,
-		maxSize:    c.config.ConnPoolSize * poolGrowthLimit,
+		maxSize:    c.config.LivePool.Get(c.config.ConnPoolSize) * poolGrowthLimit,
+		live:       c.config.LivePool,
 	}.maintain()
 }
 
@@ -171,7 +174,7 @@ func (c *UdpTransport) control() controlLoop {
 }
 
 func (c *UdpTransport) tunnelDialer() {
-	ready, ok := c.beginPoolDial(c.config.ConnPoolSize * poolGrowthLimit)
+	ready, ok := c.beginPoolDial(c.config.LivePool.Get(c.config.ConnPoolSize) * poolGrowthLimit)
 	if !ok {
 		return
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/backpack/backpack/internal/controlwire"
+	"github.com/backpack/backpack/internal/live"
 	"github.com/backpack/backpack/internal/metrics"
 	"github.com/backpack/backpack/internal/utils"
 	"github.com/backpack/backpack/internal/utils/network"
@@ -58,6 +59,7 @@ type TcpMuxConfig struct {
 	SnifferLog       string
 	Token            string
 	Ports            []string
+	LivePorts        *live.Ports // optional: mappings changed without a restart (internal/live)
 	AcceptUDP        bool
 	Nodelay          bool
 	Sniffer          bool
@@ -458,7 +460,7 @@ func (s *TcpMuxTransport) session(g *tcpMuxGen) muxSession {
 // forwarder is this transport's forwarded ports for one generation.
 func (s *TcpMuxTransport) forwarder(g *tcpMuxGen) portForwarder {
 	return portForwarder{
-		ctx: g.ctx, ports: s.config.Ports, acceptUDP: s.config.AcceptUDP,
+		ctx: g.ctx, ports: s.config.Ports, live: s.config.LivePorts, acceptUDP: s.config.AcceptUDP,
 		queue: g.localChannel, limits: s.limits, listeners: &s.listeners, log: s.logger,
 		tune:   nodelayTune(s.config.Nodelay, s.logger),
 		queued: muxRequestForGeneration(g.ctx, &s.counterMutex, &s.streamCounter, &s.sessionCounter, s.config.MuxCon, g.reqNewConnChan, s.logger),

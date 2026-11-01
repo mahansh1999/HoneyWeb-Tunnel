@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/backpack/backpack/internal/controlwire"
+	"github.com/backpack/backpack/internal/live"
 	"github.com/backpack/backpack/internal/metrics"
 	"github.com/backpack/backpack/internal/tunnel/naive"
 	"github.com/backpack/backpack/internal/utils"
@@ -55,6 +56,7 @@ type TcpConfig struct {
 	Token         string
 	SnifferLog    string
 	Ports         []string
+	LivePorts     *live.Ports // optional: mappings changed without a restart (internal/live)
 	Nodelay       bool
 	Sniffer       bool
 	KeepAlive     time.Duration
@@ -448,7 +450,7 @@ func (s *TcpTransport) handleLoop(g *tcpGen) {
 // forwarder is this transport's forwarded ports for one generation.
 func (s *TcpTransport) forwarder(g *tcpGen) portForwarder {
 	return portForwarder{
-		ctx: g.ctx, ports: s.config.Ports, acceptUDP: s.config.AcceptUDP,
+		ctx: g.ctx, ports: s.config.Ports, live: s.config.LivePorts, acceptUDP: s.config.AcceptUDP,
 		queue: g.localChannel, limits: s.limits, listeners: &s.listeners, log: s.logger,
 		tune:   nodelayTune(s.config.Nodelay, s.logger),
 		queued: requestAlways(g.reqNewConnChan, s.logger),

@@ -178,6 +178,16 @@ func awaitConfigChange(ctx, gen context.Context, path string, current *config.Co
 			logger.Debug("the configuration file changed but means the same thing; leaving the tunnel alone")
 			continue
 		}
+		// Port mappings and a larger pool reach the running tunnel without a
+		// restart (live.go). current then becomes the file, so the next
+		// comparison, and any later restart, start from what is running.
+		if !tlsChanged {
+			if what, ok := applyLive(current, next); ok {
+				logger.Infof("the configuration file changed; applied without a restart: %s", what)
+				*current = *next
+				continue
+			}
+		}
 		return next, wakeConfig
 	}
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/backpack/backpack/config" // for mode
 	"github.com/backpack/backpack/internal/controlwire"
+	"github.com/backpack/backpack/internal/live"
 	"github.com/backpack/backpack/internal/metrics"
 	"github.com/backpack/backpack/internal/utils/network"
 	"github.com/backpack/backpack/internal/web"
@@ -62,6 +63,7 @@ type WsMuxConfig struct {
 	ACMEEmail        string
 	ACMECacheDir     string
 	Ports            []string
+	LivePorts        *live.Ports // optional: mappings changed without a restart (internal/live)
 	AcceptUDP        bool
 	Nodelay          bool
 	Sniffer          bool
@@ -410,7 +412,7 @@ func (s *WsMuxTransport) session(g *wsMuxGen) muxSession {
 // forwarder is this transport's forwarded ports for one generation.
 func (s *WsMuxTransport) forwarder(g *wsMuxGen) portForwarder {
 	return portForwarder{
-		ctx: g.ctx, ports: s.config.Ports, acceptUDP: s.config.AcceptUDP,
+		ctx: g.ctx, ports: s.config.Ports, live: s.config.LivePorts, acceptUDP: s.config.AcceptUDP,
 		queue: g.localChannel, limits: s.limits, listeners: &s.listeners, log: s.logger,
 		tune:   s.tuneUserConn,
 		queued: muxRequestForGeneration(g.ctx, &s.counterMutex, &s.streamCounter, &s.sessionCounter, s.config.MuxCon, g.reqNewConnChan, s.logger),

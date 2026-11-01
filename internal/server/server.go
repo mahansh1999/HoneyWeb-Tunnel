@@ -6,6 +6,7 @@ import (
 
 	"github.com/backpack/backpack/config"
 	"github.com/backpack/backpack/internal/debugserver"
+	"github.com/backpack/backpack/internal/live"
 	"github.com/backpack/backpack/internal/server/transport"
 	"github.com/backpack/backpack/internal/tunnel/chain"
 	"github.com/backpack/backpack/internal/tunnel/naive"
@@ -28,6 +29,10 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	logger *logrus.Logger
+	// livePorts lets cmd change the port mappings of the running tunnel
+	// without restarting it (internal/live). Shared by every transport this
+	// server starts, so a fallback transport serves the current mappings too.
+	livePorts *live.Ports
 }
 
 func NewServer(cfg *config.ServerConfig, parentCtx context.Context) *Server {
@@ -39,11 +44,27 @@ func NewServer(cfg *config.ServerConfig, parentCtx context.Context) *Server {
 	// Loopback unless this tunnel asked otherwise; see web/monitorhttp.go.
 	web.SetMonitorBind(cfg.WebBind)
 	return &Server{
-		config: cfg,
-		ctx:    ctx,
-		cancel: cancel,
-		logger: utils.NewLoggerWithFormat(cfg.LogLevel, cfg.LogFormat),
+		config:    cfg,
+		ctx:       ctx,
+		cancel:    cancel,
+		logger:    utils.NewLoggerWithFormat(cfg.LogLevel, cfg.LogFormat),
+		livePorts: live.NewPorts(cfg.Ports),
 	}
+}
+
+// LivePorts is the holder through which the running tunnel's port mappings
+// change without a restart, or nil when a transport this server may run cannot
+// do that (the udp transport forwards flows its own way).
+func (s *Server) LivePorts() *live.Ports {
+	if s.config.Transport == config.UDP {
+		return nil
+	}
+	for _, t := range s.config.FallbackTransports {
+		if t == config.UDP {
+			return nil
+		}
+	}
+	return s.livePorts
 }
 
 func (s *Server) Start() {
@@ -166,6 +187,7 @@ func (s *Server) startTransport(ctx context.Context, tr config.TransportType) ru
 			Token:          s.config.Token,
 			ChannelSize:    s.config.ChannelSize,
 			Ports:          s.config.Ports,
+			LivePorts:      s.livePorts,
 			Sniffer:        s.config.Sniffer,
 			WebPort:        s.config.WebPort,
 			SnifferLog:     s.config.SnifferLog,
@@ -196,6 +218,7 @@ func (s *Server) startTransport(ctx context.Context, tr config.TransportType) ru
 			Token:            s.config.Token,
 			ChannelSize:      s.config.ChannelSize,
 			Ports:            s.config.Ports,
+			LivePorts:        s.livePorts,
 			MuxCon:           s.config.MuxCon,
 			MuxVersion:       s.config.MuxVersion,
 			MaxFrameSize:     s.config.MaxFrameSize,
@@ -239,6 +262,7 @@ func (s *Server) startTransport(ctx context.Context, tr config.TransportType) ru
 			Token:          s.config.Token,
 			ChannelSize:    s.config.ChannelSize,
 			Ports:          s.config.Ports,
+			LivePorts:      s.livePorts,
 			Sniffer:        s.config.Sniffer,
 			WebPort:        s.config.WebPort,
 			SnifferLog:     s.config.SnifferLog,
@@ -263,6 +287,7 @@ func (s *Server) startTransport(ctx context.Context, tr config.TransportType) ru
 			Token:            s.config.Token,
 			ChannelSize:      s.config.ChannelSize,
 			Ports:            s.config.Ports,
+			LivePorts:        s.livePorts,
 			MuxCon:           s.config.MuxCon,
 			MuxVersion:       s.config.MuxVersion,
 			MaxFrameSize:     s.config.MaxFrameSize,
@@ -293,6 +318,7 @@ func (s *Server) startTransport(ctx context.Context, tr config.TransportType) ru
 			Token:        s.config.Token,
 			ChannelSize:  s.config.ChannelSize,
 			Ports:        s.config.Ports,
+			LivePorts:    s.livePorts,
 			Sniffer:      s.config.Sniffer,
 			WebPort:      s.config.WebPort,
 			SnifferLog:   s.config.SnifferLog,
@@ -323,6 +349,7 @@ func (s *Server) startTransport(ctx context.Context, tr config.TransportType) ru
 			Token:            s.config.Token,
 			ChannelSize:      s.config.ChannelSize,
 			Ports:            s.config.Ports,
+			LivePorts:        s.livePorts,
 			MuxCon:           s.config.MuxCon,
 			MuxVersion:       s.config.MuxVersion,
 			MaxFrameSize:     s.config.MaxFrameSize,

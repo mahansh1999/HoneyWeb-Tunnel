@@ -228,6 +228,9 @@ func runEngine(cfg *config.Config, ctx context.Context, configPath string, apply
 		defer stopMetrics()
 
 		srv := server.NewServer(&cfg.Server, ctx) // server
+		// Reloads that only change the port mappings reach this server live.
+		setLiveTargets(srv.LivePorts(), nil)
+		defer setLiveTargets(nil, nil)
 		reportZeroCopy(ctx)
 		// Start blocks until its own context ends and everything it owns has
 		// stopped. Running it in a goroutine and waiting on ctx here instead
@@ -248,6 +251,9 @@ func runEngine(cfg *config.Config, ctx context.Context, configPath string, apply
 		defer stopMetrics()
 
 		clnt := client.NewClient(&cfg.Client, ctx) // client
+		// Reloads that only raise the pool reach this client live.
+		setLiveTargets(nil, clnt.LivePool())
+		defer setLiveTargets(nil, nil)
 		reportZeroCopy(ctx)
 		// Blocks until the generation is over; see the server case above.
 		clnt.Start()
