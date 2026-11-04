@@ -25,7 +25,7 @@
 set -euo pipefail
 umask 022   # a strict caller umask (077) would make /opt/hwtunnel unreadable for the service user
 
-VERSION_DEFAULT="hw-v1.1.0"
+VERSION_DEFAULT="hw-v1.2.0"
 REPO_DEFAULT="mahansh1999/HoneyWeb-Tunnel"
 ROOT=/opt/hwtunnel
 BIN_DIR=$ROOT/bin
@@ -139,6 +139,8 @@ install_binary() {
     die "another HoneyWeb Tunnel binary is active ($cur) and other tunnels use it; nothing changed (run 'install.sh upgrade' first)"
   fi
   install -d -m 0755 "$ROOT" "$BIN_DIR"
+  # a different build under a name already taken (the active binary, or the one to roll back to) gets its own name
+  if [ -e "$BIN_DIR/hwtunnel-$tag" ] && ! cmp -s "$src" "$BIN_DIR/hwtunnel-$tag"; then tag="$tag-$(sha256sum "$src" | cut -c1-8)"; fi
   install -m 0755 "$src" "$BIN_DIR/hwtunnel-$tag.new"
   "$BIN_DIR/hwtunnel-$tag.new" -v >/dev/null || die "the downloaded binary does not run on this host"
   mv "$BIN_DIR/hwtunnel-$tag.new" "$BIN_DIR/hwtunnel-$tag"
@@ -249,6 +251,23 @@ health() { # name role port family
   fi
 }
 
+# --- upgrade helpers ---
+# running_units: the active hwtunnel units (tunnels and the management agent), not the oneshot firewall units
+running_units() { systemctl list-units 'hwtunnel-*.service' --state=active --no-legend --plain 2>/dev/null | awk '{print $1}' | grep -v -- '-firewall\.service$' || true; }
+# unit_sessions UNIT: established tunnel connections of a tunnel unit (0 for the agent or a tunnel with none)
+unit_sessions() { local n=${1#hwtunnel-} f p; n=${n%.service}; f=$ETC/$n.toml; [ -f "$f" ] || { echo 0; return; }
+  if grep -q '^\[server\]' "$f"; then p=$(sed -nE 's/^bind_addr[[:space:]]*=[[:space:]]*"[^"]*:([0-9]+)".*/\1/p' "$f" | head -1)
+    ss -Htn state established "( sport = :${p:-0} )" | wc -l
+  else p=$(sed -nE 's/^remote_addr[[:space:]]*=[[:space:]]*"[^"]*:([0-9]+)".*/\1/p' "$f" | head -1)
+    ss -Htn state established "( dport = :${p:-0} )" | wc -l; fi; }
+# unit_healthy UNIT BEFORE: active for 5 s in a row (a binary that crashes and restarts fails this), and with
+# tunnel connections again if it had any before; up to 60 s
+unit_healthy() { local u=$1 before=$2 i streak=0
+  for i in $(seq 1 60); do sleep 1
+    if systemctl is-active --quiet "$u" && { [ "$before" = 0 ] || [ "$(unit_sessions "$u")" -ge 1 ]; }; then
+      streak=$((streak + 1)); [ $streak -ge 5 ] && return 0; else streak=0; fi
+  done; return 1; }
+
 case "$cmd" in
   server|client)
     need systemctl ss sha256sum install journalctl
@@ -340,12 +359,35 @@ $perf"
     fi
     ;;
   upgrade)
+    # Binary only: configs, units, firewall rules and tokens are never rewritten. The running tunnels restart on the
+    # new binary one after another; if any of them does not come back, every tunnel goes back to the old binary.
     [ -L "$BIN_DIR/hwtunnel" ] || die "no HoneyWeb Tunnel installation found"
-    install_binary "$(fetch_binary)" "$version"
-    for u in $(systemctl list-units 'hwtunnel-*.service' --no-legend --plain | awk '{print $1}' | grep -v firewall); do
-      systemctl restart "$u"; sleep 2; systemctl is-active --quiet "$u" && say "$u restarted" || echo "WARNING: $u failed; run: bash install.sh rollback"
-    done
-    say "configs in $ETC were not touched"
+    old=$(readlink "$BIN_DIR/hwtunnel"); [ -x "$BIN_DIR/$old" ] || die "the active binary $BIN_DIR/$old is missing"
+    new=$(fetch_binary)
+    oldsum=$(sha256sum "$BIN_DIR/$old" | cut -c1-12); newsum=$(sha256sum "$new" | cut -c1-12)
+    say "installed: $old (sha256 $oldsum…, $("$BIN_DIR/hwtunnel" -v 2>&1 | head -1))"
+    say "release:   hwtunnel-$version (sha256 $newsum…, $("$new" -v 2>&1 | head -1))"
+    if cmp -s "$new" "$BIN_DIR/$old"; then
+      say "already the latest release: nothing changed, nothing restarted"; echo "HWT_RESULT ok upgrade=none version=$old"; exit 0; fi
+    units=$(running_units)
+    declare -A before; for u in $units; do before[$u]=$(unit_sessions "$u"); done
+    prev_before=$(cat "$BIN_DIR/.previous" 2>/dev/null || true)
+    say "tunnels that restart now (their connections are cut for a few seconds): $(echo $units | sed 's/hwtunnel-//g; s/\.service//g')"
+    install_binary "$new" "$version"; cur=$(readlink "$BIN_DIR/hwtunnel")
+    bad=""; moved=""; for u in $units; do moved="$moved $u"; systemctl restart "$u"; unit_healthy "$u" "${before[$u]}" || { bad="$u"; break; }; say "$u healthy on $cur"; done
+    if [ -n "$bad" ]; then
+      echo "!! $bad is not healthy on $cur; every tunnel goes back to $old" >&2
+      journalctl -u "$bad" -n 5 --no-pager -o cat 2>/dev/null | sed 's/^/   /' >&2 || true
+      ln -sfn "$old" "$BIN_DIR/hwtunnel"
+      if [ -n "$prev_before" ]; then printf '%s\n' "$prev_before" > "$BIN_DIR/.previous"; else rm -f "$BIN_DIR/.previous"; fi
+      # only the units already moved to the new binary restart again; the others never left the old one
+      rb=""; for u in $moved; do systemctl restart "$u"; unit_healthy "$u" "${before[$u]}" || rb="$rb $u"; done
+      echo "HWT_RESULT failed upgrade=rolled-back from=$old to=$cur"
+      [ -z "$rb" ] && die "upgrade to $cur failed and was rolled back: every tunnel runs $old again and is healthy (configs untouched)"
+      die "upgrade to $cur failed; after going back to $old these are still not healthy:$rb (journalctl -u UNIT)"
+    fi
+    say "upgraded: $old -> $cur; configs in $ETC untouched. Back to the old binary: install.sh rollback"
+    echo "HWT_RESULT ok upgrade=done from=$old to=$cur"
     ;;
   rollback)
     [ -s "$BIN_DIR/.previous" ] || die "no previous binary recorded"

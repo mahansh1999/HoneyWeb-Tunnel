@@ -12,6 +12,8 @@
 # server's address, the tunnel port, the transport, the user ports, the capacity and the token, with a checksum:
 # the foreign server connects here by itself, and a link cut short in a paste is refused.
 #
+# Run again on a server that has it: upgrades to the latest release (configs kept); --add installs another
+# tunnel next to the existing ones.
 # Without questions:  iran.sh --transport wssmux --tunnel-port 9090 --port 443[,8443] [--allow-from IP]
 #                     [--public-ip IP] [--pool N] [--name NAME] [--yes]
 # Other commands are passed to install.sh: iran.sh status | uninstall --name N | upgrade | rollback
@@ -31,6 +33,7 @@ for x in curl ss sha256sum systemctl base64; do command -v $x >/dev/null || die 
 # --- release files: next to this script, or downloaded from the release and checked against SHA256SUMS ---
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 fetch_release() {
+  [ -z "${BINARY:-}" ] || return 0   # already fetched in this run
   local a; case "$(uname -m)" in x86_64|amd64) a=amd64;; aarch64|arm64) a=arm64;; *) die "unsupported CPU $(uname -m)";; esac
   local here=""; [ -f "$0" ] && here=$(cd "$(dirname "$0")" && pwd)
   local files=(install.sh SHA256SUMS "hwtunnel-linux-$a") f
@@ -85,18 +88,32 @@ install_manager() { local n=$1 pr out
     else echo "  manager      hwt-manage  (two-sided agent not set up: $(printf '%s' "$out" | tail -1 | cut -c1-120); retry: hwt-manage peer-setup $n)"; fi
   else echo "  manager      hwt-manage  (this engine has no two-sided agent: changes are made on each server)"; fi; }
 
+# A server that already has HoneyWeb Tunnel: running this script again upgrades it to the latest release (binary
+# checked against SHA256SUMS; configs, tokens and firewall rules kept; every tunnel back on the old binary if one
+# does not come back) instead of installing a second copy.
+installed() { [ -L /opt/hwtunnel/bin/hwtunnel ] && ls /opt/hwtunnel/etc/*.toml >/dev/null 2>&1; }
+do_upgrade() { local rc=0 f
+  fetch_release
+  echo "$(c '1;33' 'HoneyWeb Tunnel is already installed here'): upgrading it to the latest release (nothing is installed twice)"
+  echo "  tunnels      $(for f in /opt/hwtunnel/etc/*.toml; do basename "$f" .toml; done | paste -sd' ')"
+  bash "$WORK/install.sh" upgrade --binary "$BINARY" "${VERARGS[@]}" || rc=$?
+  if [ $rc = 0 ] && [ -f "$WORK/manage.sh" ]; then
+    install -m 0750 "$WORK/manage.sh" /opt/hwtunnel/bin/manage.sh; ln -sfn /opt/hwtunnel/bin/manage.sh /usr/local/bin/hwt-manage
+    echo "  manager      hwt-manage updated$(systemctl is-active --quiet hwtunnel-peer || echo "; two-sided management: hwt-manage peer-setup NAME on both servers")"
+  fi
+  return $rc; }
+
 # Other commands go straight to install.sh.
 case "${1:-}" in
   status|uninstall|rollback) fetch_release; rc=0; bash "$WORK/install.sh" "$@" || rc=$?; exit $rc;;
-  upgrade) shift; fetch_release; rc=0; bash "$WORK/install.sh" upgrade --binary "$BINARY" "${VERARGS[@]}" "$@" || rc=$?
-    if [ $rc = 0 ] && [ -f "$WORK/manage.sh" ] && [ -d /opt/hwtunnel/bin ]; then install -m 0750 "$WORK/manage.sh" /opt/hwtunnel/bin/manage.sh; ln -sfn /opt/hwtunnel/bin/manage.sh /usr/local/bin/hwt-manage; fi; exit $rc;;
+  upgrade) installed || die "no HoneyWeb Tunnel installation here"; rc=0; do_upgrade || rc=$?; exit $rc;;
 esac
 
-transport=""; tport=""; ports=""; allow=""; pubip=""; name=""; pool=""; yes=0
+transport=""; tport=""; ports=""; allow=""; pubip=""; name=""; pool=""; yes=0; add=0
 while [ $# -gt 0 ]; do case "$1" in
   --transport) transport=$2; shift 2;; --tunnel-port) tport=$2; shift 2;; --port) ports=$2; shift 2;;
   --allow-from) allow=$2; shift 2;; --public-ip) pubip=$2; shift 2;; --name) name=$2; shift 2;; --pool) pool=$2; shift 2;;
-  --yes|-y) yes=1; shift;; -h|--help) sed -n '2,18p' "$0"; exit 0;; *) die "unknown option $1";; esac; done
+  --add) add=1; shift;; --yes|-y) yes=1; shift;; -h|--help) sed -n '2,19p' "$0"; exit 0;; *) die "unknown option $1";; esac; done
 
 TRANSPORTS=(wssmux tcpmux wsmux tcp ws wss stealth kcp quic)
 DESC=("WebSocket + TLS, multiplexed        [HoneyWeb Recommended]"
@@ -114,6 +131,17 @@ tcp_in_use() { ss -Htln "( sport = :$1 )" | grep -q .; }
 who() { ss -Htulnp "( sport = :$1 )" 2>/dev/null | grep -o 'users:(("[^"]*"' | head -1 | cut -d'"' -f2; }
 lport() { local m=${1%%=*}; echo "${m##*:}"; }
 valid_port() { [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
+
+# Run again on a server that already has HoneyWeb Tunnel: upgrade (default), or --add another tunnel next to it.
+if installed; then
+  if [ $add = 0 ] && [ -z "$transport" ] && tty_ok; then
+    echo "HoneyWeb Tunnel is already installed here ($(readlink /opt/hwtunnel/bin/hwtunnel))."
+    ask "1) upgrade to the latest release   2) add another tunnel" 1; [ "$REPLY" = 2 ] && add=1; fi
+  rc=0; do_upgrade || rc=$?
+  [ $rc = 0 ] || die "the upgrade did not complete (see above); no new tunnel was added"
+  [ $add = 1 ] || { echo "Done. To add another tunnel on this server: iran.sh --add"; exit 0; }
+  echo
+fi
 
 echo; echo "$(c '1;33' 'HoneyWeb Tunnel') - Iran (entry) server setup"; echo
 

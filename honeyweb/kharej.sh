@@ -5,7 +5,8 @@
 #
 # The link (hwt://...) carries the Iran server's address, tunnel port, transport, user ports, capacity and token,
 # with a checksum. Nothing is asked: the script checks the link and the path to Iran, installs, and connects.
-# Run without a link and it asks for one (paste it).
+# Run without a link and it asks for one (paste it). Run again on a server that has it: upgrades to the latest
+# release (configs kept); a link of a tunnel that is not here yet is then added.
 #
 # Options:  kharej.sh LINK [--pool N] [--name NAME]
 # Other commands are passed to install.sh: kharej.sh status | uninstall --name N | upgrade | rollback
@@ -25,6 +26,7 @@ for x in curl ss sha256sum systemctl base64; do command -v $x >/dev/null || die 
 # --- release files: next to this script, or downloaded from the release and checked against SHA256SUMS ---
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 fetch_release() {
+  [ -z "${BINARY:-}" ] || return 0   # already fetched in this run
   local a; case "$(uname -m)" in x86_64|amd64) a=amd64;; aarch64|arm64) a=arm64;; *) die "unsupported CPU $(uname -m)";; esac
   local here=""; [ -f "$0" ] && here=$(cd "$(dirname "$0")" && pwd)
   local files=(install.sh SHA256SUMS "hwtunnel-linux-$a") f
@@ -79,16 +81,38 @@ install_manager() { local n=$1 pr out
     else echo "  manager      hwt-manage  (two-sided agent not set up: $(printf '%s' "$out" | tail -1 | cut -c1-120); retry: hwt-manage peer-setup $n)"; fi
   else echo "  manager      hwt-manage  (this engine has no two-sided agent: changes are made on each server)"; fi; }
 
+# A server that already has HoneyWeb Tunnel: running this script again upgrades it to the latest release (binary
+# checked against SHA256SUMS; configs, tokens and firewall rules kept; every tunnel back on the old binary if one
+# does not come back) instead of installing a second copy.
+installed() { [ -L /opt/hwtunnel/bin/hwtunnel ] && ls /opt/hwtunnel/etc/*.toml >/dev/null 2>&1; }
+do_upgrade() { local rc=0 f
+  fetch_release
+  echo "$(c '1;33' 'HoneyWeb Tunnel is already installed here'): upgrading it to the latest release (nothing is installed twice)"
+  echo "  tunnels      $(for f in /opt/hwtunnel/etc/*.toml; do basename "$f" .toml; done | paste -sd' ')"
+  bash "$WORK/install.sh" upgrade --binary "$BINARY" "${VERARGS[@]}" || rc=$?
+  if [ $rc = 0 ] && [ -f "$WORK/manage.sh" ]; then
+    install -m 0750 "$WORK/manage.sh" /opt/hwtunnel/bin/manage.sh; ln -sfn /opt/hwtunnel/bin/manage.sh /usr/local/bin/hwt-manage
+    echo "  manager      hwt-manage updated$(systemctl is-active --quiet hwtunnel-peer || echo "; two-sided management: hwt-manage peer-setup NAME on both servers")"
+  fi
+  return $rc; }
+
 case "${1:-}" in
   status|uninstall|rollback) fetch_release; rc=0; bash "$WORK/install.sh" "$@" || rc=$?; exit $rc;;
-  upgrade) shift; fetch_release; rc=0; bash "$WORK/install.sh" upgrade --binary "$BINARY" "${VERARGS[@]}" "$@" || rc=$?
-    if [ $rc = 0 ] && [ -f "$WORK/manage.sh" ] && [ -d /opt/hwtunnel/bin ]; then install -m 0750 "$WORK/manage.sh" /opt/hwtunnel/bin/manage.sh; ln -sfn /opt/hwtunnel/bin/manage.sh /usr/local/bin/hwt-manage; fi; exit $rc;;
+  upgrade) installed || die "no HoneyWeb Tunnel installation here"; rc=0; do_upgrade || rc=$?; exit $rc;;
 esac
 
 link=""; pool=""; name=""; asked=0
 while [ $# -gt 0 ]; do case "$1" in
   hwt://*) link=$1; shift;; --pool) pool=$2; shift 2;; --name) name=$2; shift 2;;
   --yes|-y) shift;; -h|--help) sed -n '2,12p' "$0"; exit 0;; *) die "unknown option $1 (the link starts with hwt://)";; esac; done
+
+# Run again on a server that already has HoneyWeb Tunnel: upgrade it; a link of a tunnel not yet here is then added.
+if installed; then
+  rc=0; do_upgrade || rc=$?
+  [ $rc = 0 ] || die "the upgrade did not complete (see above); nothing else was changed"
+  [ -n "$link" ] || { echo "Done. To add another tunnel on this server, run kharej.sh with its link."; exit 0; }
+  echo
+fi
 
 echo; echo "$(c '1;33' 'HoneyWeb Tunnel') - foreign (exit) server setup"; echo
 while [ -z "$link" ]; do tty_ok || die "give the setup link: kharej.sh hwt://..."
@@ -103,6 +127,11 @@ IFS='|' read -r ver transport entry tport ports iname token lpool sum <<<"$dec"
 [[ "$transport" =~ ^(wssmux|tcpmux|wsmux|tcp|ws|wss|stealth|kcp|quic)$ ]] || die "the link names an unknown transport"
 [[ "$entry" =~ ^[A-Za-z0-9.-]+$ && "$tport" =~ ^[0-9]+$ && "$token" =~ ^[0-9a-f]{64}$ && "$iname" =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]] || die "the link is damaged"
 [[ "$ports" =~ ^[0-9.:=,-]+$ && "$lpool" =~ ^[0-9]+$ ]] || die "the link is damaged"
+# the same tunnel (same token) already here: it was upgraded above, nothing is installed twice (hashes compared)
+th=$(printf '%s' "$token" | sha256sum | cut -c1-64)
+for f in /opt/hwtunnel/etc/*.toml; do [ -f "$f" ] || continue
+  [ "$(sed -nE 's/^token[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$f" | head -1 | tr -d '\n' | sha256sum | cut -c1-64)" = "$th" ] || continue
+  echo "This tunnel is already installed here as $(basename "$f" .toml); nothing is installed twice."; exit 0; done
 udp_t() { [ "$transport" = kcp ] || [ "$transport" = quic ]; }
 mux_t() { case "$transport" in tcpmux|wsmux|wssmux) return 0;; esac; return 1; }
 pool=${pool:-$lpool}
