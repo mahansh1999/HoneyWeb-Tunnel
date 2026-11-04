@@ -110,7 +110,12 @@ func Sign(token string, r *Request) {
 
 var (
 	allowedCmd = map[string]bool{"list": true, "show": true, "ports": true, "pool": true, "profile": true,
-		"restart": true, "backups": true, "restore": true, "remove": true, "version": true}
+		"restart": true, "backups": true, "restore": true, "remove": true, "version": true,
+		// make-before-break migration (manage.sh migrate): the client side of the new tunnel, and starting or
+		// following a migration from the foreign side (it runs on Iran in the background)
+		"clone-client": true, "migrate": true, "migrate-status": true, "migrate-abort": true, "migrate-resume": true, "migrate-list": true,
+		// addresses: the scheduled tunnel-port switch of the other side, and a planned IP change made from either side
+		"tunnel-port": true, "set-remote": true, "set-allow": true}
 	argRE = regexp.MustCompile(`^[A-Za-z0-9._:=,/-]{1,200}$`)
 )
 

@@ -30,6 +30,7 @@ fetch_release() {
   local files=(install.sh SHA256SUMS "hwtunnel-linux-$a") f
   if [ -n "$here" ] && [ -f "$here/install.sh" ] && [ -f "$here/hwtunnel-linux-$a" ] && [ -f "$here/SHA256SUMS" ]; then
     for f in "${files[@]}"; do cp "$here/$f" "$WORK/"; done
+    if [ -f "$here/manage.sh" ]; then cp "$here/manage.sh" "$WORK/"; fi
     TAG=${HWT_VERSION:-}
   else
     local base="https://github.com/$REPO/releases/latest/download"
@@ -37,6 +38,7 @@ fetch_release() {
     if curl -fsSL --retry 2 -o "$WORK/SHA256SUMS" "$base/SHA256SUMS" 2>/dev/null; then
       TAG=$VERSION; [ "$VERSION" != latest ] || TAG=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed 's|.*/tag/||')
       for f in install.sh "hwtunnel-linux-$a"; do curl -fsSL --retry 2 -o "$WORK/$f" "$base/$f" || die "download failed: $f"; done
+      curl -fsSL --retry 2 -o "$WORK/manage.sh" "$base/manage.sh" 2>/dev/null || rm -f "$WORK/manage.sh"
     else
       # private repository: a GitHub token with read access, never shown and never put on a command line
       if [ -z "${GITHUB_TOKEN:-}" ]; then tty_ok || die "the release is private: set GITHUB_TOKEN"
@@ -52,18 +54,35 @@ fetch_release() {
         curl -fsSL -H @"$WORK/.auth" -H "Accept: application/octet-stream" -o "$WORK/$f" "https://api.github.com/repos/$REPO/releases/assets/$id" \
           || { rm -f "$WORK/.auth"; die "download failed: $f"; }
       done
+      id=$(printf '%s' "$rel" | tr -d '\n' | grep -o "\"url\": *\"[^\"]*/assets/[0-9]*\"[^}]*\"name\": *\"manage.sh\"" | grep -o 'assets/[0-9]*' | head -1 | cut -d/ -f2 || true)
+      [ -z "$id" ] || curl -fsSL -H @"$WORK/.auth" -H "Accept: application/octet-stream" -o "$WORK/manage.sh" "https://api.github.com/repos/$REPO/releases/assets/$id" || rm -f "$WORK/manage.sh"
       rm -f "$WORK/.auth"
     fi
   fi
   (cd "$WORK" && grep -E " [*]?(install\.sh|hwtunnel-linux-$a)\$" SHA256SUMS | sha256sum -c --quiet -) || die "checksum mismatch: refusing to install"
+  # the manager is optional; installed only when SHA256SUMS lists it and it matches
+  if [ -f "$WORK/manage.sh" ] && ! (cd "$WORK" && grep -E " [*]?manage\.sh$" SHA256SUMS | sha256sum -c --quiet - >/dev/null 2>&1); then
+    echo "note: manage.sh does not match SHA256SUMS; the tunnel manager is not installed"; rm -f "$WORK/manage.sh"; fi
   BINARY="$WORK/hwtunnel-linux-$a"
   [[ "${TAG:-}" =~ ^[A-Za-z0-9._-]+$ ]] || TAG=""   # empty: install.sh names the binary after its own version
   VERARGS=(); [ -z "$TAG" ] || VERARGS=(--version "$TAG")
 }
 
+# The HoneyWeb Tunnel Manager (manage.sh, command hwt-manage) and its two-sided agent, when the release carries them.
+install_manager() { local n=$1 pr out
+  [ -f "$WORK/manage.sh" ] || { echo "  manager      not in this release (only the tunnel was installed)"; return 0; }
+  install -m 0750 "$WORK/manage.sh" /opt/hwtunnel/bin/manage.sh; ln -sfn /opt/hwtunnel/bin/manage.sh /usr/local/bin/hwt-manage
+  pr=$(/opt/hwtunnel/bin/hwtunnel peer 2>&1 || true)
+  if [[ "$pr" == *"serve|run|queue"* ]]; then
+    if out=$(bash /opt/hwtunnel/bin/manage.sh peer-setup "$n" --yes 2>&1); then
+      echo "  manager      hwt-manage  (two-sided: either server can change both)"
+    else echo "  manager      hwt-manage  (two-sided agent not set up: $(printf '%s' "$out" | tail -1 | cut -c1-120); retry: hwt-manage peer-setup $n)"; fi
+  else echo "  manager      hwt-manage  (this engine has no two-sided agent: changes are made on each server)"; fi; }
+
 case "${1:-}" in
   status|uninstall|rollback) fetch_release; rc=0; bash "$WORK/install.sh" "$@" || rc=$?; exit $rc;;
-  upgrade) shift; fetch_release; rc=0; bash "$WORK/install.sh" upgrade --binary "$BINARY" "${VERARGS[@]}" "$@" || rc=$?; exit $rc;;
+  upgrade) shift; fetch_release; rc=0; bash "$WORK/install.sh" upgrade --binary "$BINARY" "${VERARGS[@]}" "$@" || rc=$?
+    if [ $rc = 0 ] && [ -f "$WORK/manage.sh" ] && [ -d /opt/hwtunnel/bin ]; then install -m 0750 "$WORK/manage.sh" /opt/hwtunnel/bin/manage.sh; ln -sfn /opt/hwtunnel/bin/manage.sh /usr/local/bin/hwt-manage; fi; exit $rc;;
 esac
 
 link=""; pool=""; name=""; asked=0
@@ -119,7 +138,9 @@ fetch_release
 (umask 077; printf '%s\n' "$token" > "$WORK/token")
 bash "$WORK/install.sh" client --transport "$transport" --server "$entry:$tport" --name "$name" --pool "$pool" \
   --binary "$BINARY" "${VERARGS[@]}" --token-file "$WORK/token"
+install_manager "$name"
 echo
 echo "$(c '1;32' 'Done.') This server is connected to Iran ($entry:$tport, $transport)."
 [ $miss = 0 ] || echo "$(c 33 'Note:') start the service behind the user ports above; the tunnel delivers users to it."
 echo "Status: bash kharej.sh status    Remove: bash kharej.sh uninstall --name $name"
+[ ! -x /usr/local/bin/hwt-manage ] || echo "Manage (ports, tunnel port, IP change, remove; both servers): hwt-manage"
