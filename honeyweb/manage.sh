@@ -34,7 +34,7 @@
 # Every change is one transaction: lock -> backup (TXID) -> new file checked by `hwtunnel check` -> impact (active
 # connections) -> confirm -> atomic replace -> health check -> automatic rollback if unhealthy. Results go to
 # /opt/hwtunnel/etc/manage.log. Only /opt/hwtunnel/etc/NAME.* and the hwtunnel-NAME units are ever touched:
-# Xray, PasarGuard, Docker, nginx and any other service are not looked at or changed.
+# proxy panels, Docker, nginx and any other service are not looked at or changed.
 # Today the engine restarts a tunnel's generation on any config change: active connections of THAT tunnel are cut
 # for about 2 s (other tunnels are not affected). The impact line says so before you confirm.
 set -euo pipefail
@@ -132,7 +132,7 @@ apply() { local n=$1 new=$2 mode=$3 what=$4 lv=${5:-} before u since how
   if HWT_MANAGE_FAIL_HEALTH=0 healthy "$n" "$before"; then logtx "$n" "$OP" rolled-back; die "change rolled back; the tunnel runs the previous config again"
   else logtx "$n" "$OP" rollback-unhealthy; die "rolled back, but the tunnel is still unhealthy: journalctl -u hwtunnel-$n"; fi; }
 
-# ---- two-sided management (internal/peer; docs/manage/manage-tunnel.md) ----------------------------------------
+# ---- two-sided management (internal/peer) ----------------------------------------------------------------------
 AGENT=127.0.0.1:59111
 peerport() { sed -n 's/^port=//p' "$ETC/$1.peer" 2>/dev/null | head -1; }
 is_mgmt() { [[ "$1" =~ ^127\.0\.0\.1:59[2-9][0-9][0-9]=127\.0\.0\.1:59111$ ]]; }
@@ -215,7 +215,7 @@ cmd_pool() { local n=$1 v=${2:-} dec=${3:-} cur f
   [[ "$v" =~ ^[0-9]+$ ]] && [ "$v" -ge 8 ] && [ "$v" -le 8192 ] || die "pool must be 8..8192"
   cur=$(get "$n" connection_pool); cur=${cur:-8}
   [ "$v" = "$cur" ] && { say "connection_pool is already $v"; return; }
-  [ "$v" -lt "$cur" ] && [ "$dec" != --allow-decrease ] && die "lowering the pool $cur -> $v lowers capacity (the 2026-10-31 saturation came from too small a pool); add --allow-decrease if you mean it"
+  [ "$v" -lt "$cur" ] && [ "$dec" != --allow-decrease ] && die "lowering the pool $cur -> $v lowers capacity (too small a pool turns users away at the peak); add --allow-decrease if you mean it"
   NAME=$n; OP="pool:$cur->$v"; begin "$n"; f="$(cfg "$n").new-$TX"; cp -p "$(cfg "$n")" "$f"
   if grep -q '^connection_pool' "$f"; then sed -i -E "s/^connection_pool[[:space:]]*=.*/connection_pool = $v/" "$f"; else sed -i "/^\[client\]/a connection_pool = $v" "$f"; fi
   EXPECT=$(( v + 1 ))   # pool sessions + the control channel
@@ -413,7 +413,7 @@ cmd_remove_both() { local n=$1 conf=${2:-} name=${3:-} out
   (YES=1; cmd_remove "$n" --confirm "$n")
   say "remove-both $n: removed here; the other side confirmed its removal 8 s after its answer (it cannot report back through this tunnel any more: verify there with manage.sh list)"; }
 
-# ---- make-before-break migration (docs/manage/two-sided.md §4) -------------------------------------------------
+# ---- make-before-break migration -----------------------------------------------------------------------------------
 TXD=$ETC/tx
 txset() { printf '%s=%s\n' "$2" "$3" >> "$TXD/$1.state"; }
 txget() { sed -n "s/^$2=//p" "$TXD/$1.state" 2>/dev/null | tail -1; }
