@@ -61,4 +61,8 @@ bash <(curl -fsSL https://github.com/mahansh1999/HoneyWeb-Tunnel/releases/latest
 
 همان تنظیماتی که ترافیک Production HoneyWeb را حمل می‌کند، با ظرفیت صریح متناسب با اوج. هدف آن کیفیت اتصال است. جزئیات و شاهد هر مقدار: [honeyweb/RECOMMENDED.md](honeyweb/RECOMMENDED.md).
 
+## بهینه‌سازی سرورهای تانل iptables
+
+`honeyweb/net-tune.sh` دو سرور یک تانل iptables (DNAT) را که ترافیک TCP حمل می‌کند بهینه می‌کند؛ مثلاً یک Inbound ِ VLESS. اول برنامه را نشان می‌دهد (`--dry-run`)، Backup می‌گیرد، اگر بررسی‌ای شکست بخورد خودش برمی‌گرداند و به Firewall، مسیرها و سرویس‌ها دست نمی‌زند: [honeyweb/NET-TUNE_FA.md](honeyweb/NET-TUNE_FA.md).
+
 </div>

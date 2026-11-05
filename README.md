@@ -59,6 +59,12 @@ bash <(curl -fsSL https://github.com/mahansh1999/HoneyWeb-Tunnel/releases/latest
 The tuning that carries HoneyWeb's production traffic, chosen for connection quality, plus an explicit
 capacity sized for the peak. Details and the evidence behind every value: [honeyweb/RECOMMENDED.md](honeyweb/RECOMMENDED.md).
 
+## Host tuning for an iptables tunnel
+
+`honeyweb/net-tune.sh` tunes the two servers of an iptables (DNAT) tunnel that carries TCP, for example a VLESS
+inbound. It shows the plan first (`--dry-run`), backs up, rolls back by itself when a check fails, and never touches
+the firewall, routes or services: [honeyweb/NET-TUNE.md](honeyweb/NET-TUNE.md).
+
 ## Releases
 
 Every release lists the engine commit its binaries are built from and their SHA-256. Builds are reproducible:
